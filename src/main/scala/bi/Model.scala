@@ -15,11 +15,11 @@ case object Lecturer extends PersonType
 
 // General
 case class Person(
-  id: Int,
+  id: String,
   name: String,
   email: String,
-  geschlecht: Sex,
-  dateOfBirth: LocalDate,
+  geschlecht: Option[Sex],
+  dateOfBirth: Option[LocalDate],
   personType: PersonType)
 
 case class Lva(name: String, semester: Semester)
@@ -31,5 +31,5 @@ case class Forum(id: Int, lva: Lva, bereiche: Seq[Forumsbereich])
 
 case class Forumsbereich(id: Int, name: String, postings: Seq[Posting])
 
-case class Posting(id: Int, datum: LocalDateTime)
+case class Posting(id: Int, datum: LocalDateTime, sub: Seq[Posting])
 
