@@ -10,6 +10,11 @@ import org.joda.time.LocalDateTime
 import scala.io.Source
 import java.io.FilenameFilter
 import java.io.FileFilter
+import java.nio.file.Files
+import scala.io.Codec
+import java.nio.file.StandardOpenOption
+import java.nio.file.Paths._
+import java.nio.file.Path
 
 object Importer extends App with Logging {
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
@@ -19,10 +24,11 @@ object Importer extends App with Logging {
   implicit def optionSeqXmlNode2LocalDateTime(osxn: Option[Seq[Node]]): LocalDateTime = dtf.parseLocalDateTime(optionSeqXmlNode2String(osxn))
 
   val dataDir = new File("C:/tools/uni/pentaho/data")
+  val csvDir = get("csv")
   logger.info("start")
   readForum
 
-  def readForum() {
+  def readForum(): (Seq[Forum], Seq[Person]) = {
     val forumDir = new File(dataDir, "forum")
 
     def getPostings(forumsId: Int, forumsbereichId: Int): Seq[Posting] = {
@@ -32,9 +38,11 @@ object Importer extends App with Logging {
         val name: String = node.attribute("name")
         val id: Int = node.attribute("id")
         val date: LocalDateTime = node.attribute("date")
-        // TODO use text, subject
+        val betreff = (node \ "subject").text
+        val text = (node \ "text").text
         val subs = node \ "sub" \ "entry" map { e => read(e) }
-        Posting(id, date, subs)
+        // TODO set parent
+        Posting(id, date, betreffLänge = betreff.length(), textLänge = text.length, subs, None)
       }
       val file = new File(forumDir, s"$forumsId/Data/$forumsbereichId.xml")
       if (file.exists()) {
@@ -110,12 +118,29 @@ object Importer extends App with Logging {
     }
 
     val forums = getForums
-    forums foreach println
     val forumIds = forums.map(_.id)
 
     val readProgress = getReadProgress(forumIds)
 
-    val persons = getPersons(forumIds)
-    persons foreach println
+    val personsPerForum = getPersons(forumIds)
+
+    val personsWithDupes = personsPerForum.map(_._2).flatten.sortBy(_.id)
+
+    (forums, /* TODO readProgress*/ personsWithDupes)
   }
+
+  def writeCsv(file: Path, writable: Seq[CsvWritable]) {
+    val writer = Files.newBufferedWriter(file, Codec.UTF8.charSet, StandardOpenOption.CREATE)
+    writer.write(writable.head.csvHeader + "\n")
+    writable.foreach(e => writer.write(e.csv + "\n"))
+    writer.flush()
+    writer.close
+  }
+  def writeCsv(forums: Seq[Forum], persons: Seq[Person]) {
+    writeCsv(new File(csvDir.toFile(), "forums.csv").toPath, forums)
+    writeCsv(new File(csvDir.toFile(), "persons.csv").toPath, persons)
+  }
+
+  val (forums, persons) = readForum
+  writeCsv(forums, persons)
 }

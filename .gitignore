@@ -1,6 +1,7 @@
 .cache
 *.class
 *.log
+*.csv
 
 # sbt specific
 dist/*
