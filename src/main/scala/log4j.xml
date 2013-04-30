@@ -14,7 +14,7 @@
 	</category>
 
 	<root>
-		<priority value="trace" />
+		<priority value="warn" />
 		<appender-ref ref="STDOUT" />
 	</root>
 

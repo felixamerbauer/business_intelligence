@@ -1,20 +1,24 @@
 package bi
 
-import com.typesafe.scalalogging.slf4j.Logging
 import java.io.File
-import scala.xml.XML
-import scala.xml.Node
-import org.joda.time.LocalDate
-import org.joda.time.format.DateTimeFormat
-import org.joda.time.LocalDateTime
-import scala.io.Source
-import java.io.FilenameFilter
 import java.io.FileFilter
 import java.nio.file.Files
-import scala.io.Codec
-import java.nio.file.StandardOpenOption
-import java.nio.file.Paths._
 import java.nio.file.Path
+import java.nio.file.Paths.get
+import java.nio.file.StandardOpenOption
+
+import scala.Array.canBuildFrom
+import scala.io.Codec
+import scala.io.Source
+import scala.xml.Node
+import scala.xml.NodeSeq.seqToNodeSeq
+import scala.xml.XML
+
+import org.joda.time.LocalDateTime
+import org.joda.time.format.DateTimeFormat
+
+import com.typesafe.scalalogging.slf4j.Logging
+import scala.language.implicitConversions
 
 object Importer extends App with Logging {
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
@@ -32,17 +36,19 @@ object Importer extends App with Logging {
     val forumDir = new File(dataDir, "forum")
 
     def getPostings(forumsId: Int, forumsbereichId: Int): Seq[Posting] = {
+      // recursive method
       def read(node: Node): Posting = {
+        // Data of a single posting
         val user: String = node.attribute("user")
-        // TODO use
         val name: String = node.attribute("name")
         val id: Int = node.attribute("id")
         val date: LocalDateTime = node.attribute("date")
         val betreff = (node \ "subject").text
         val text = (node \ "text").text
-        val subs = node \ "sub" \ "entry" map { e => read(e) }
-        // TODO set parent
-        Posting(id, date, betreffLänge = betreff.length(), textLänge = text.length, subs, None)
+        // Optional answers
+        val children = node \ "sub" \ "entry" map { e => read(e) }
+        // Build posting
+        Posting(id, date, betreffLaenge = betreff.length(), textLaenge = text.length, children, None)
       }
       val file = new File(forumDir, s"$forumsId/Data/$forumsbereichId.xml")
       if (file.exists()) {
@@ -52,18 +58,14 @@ object Importer extends App with Logging {
         logger.error(s"No postings for forumsId $forumsId forumsbereichId $forumsbereichId")
         Seq()
       }
-      //      println(data)
-      //      ???
     }
 
-    def getForumsbereiche(forumsId: Int): Seq[Forumsbereich] = {
-      val issues = XML.loadFile(new File(forumDir, s"$forumsId/issues.xml"))
-      issues \ "entry" map { e =>
+    def getForumsbereiche(forumsId: Int): Seq[Forumsbereich] =
+      XML.loadFile(new File(forumDir, s"$forumsId/issues.xml")) \ "entry" map { e =>
         val id: Int = e.attribute("id")
         val name: String = e.attribute("what")
         Forumsbereich(id, name, getPostings(forumsId, id))
       }
-    }
 
     def getForums: Seq[Forum] = {
       val descriptions = XML.loadFile(new File(forumDir, "descriptions.xml"))
@@ -128,19 +130,31 @@ object Importer extends App with Logging {
 
     (forums, /* TODO readProgress*/ personsWithDupes)
   }
+  def code() {
+    logger.info("code")
+    val dirFilter = new FileFilter {
+      override def accept(file: File) = file.isDirectory()
+    }
+    val codeDir = new File(dataDir, "code")
+    def getInstances: Seq[Int] = codeDir.listFiles(dirFilter).map(_.getName().toInt)
 
-  def writeCsv(file: Path, writable: Seq[CsvWritable]) {
-    val writer = Files.newBufferedWriter(file, Codec.UTF8.charSet, StandardOpenOption.CREATE)
-    writer.write(writable.head.csvHeader + "\n")
-    writable.foreach(e => writer.write(e.csv + "\n"))
-    writer.flush()
-    writer.close
-  }
-  def writeCsv(forums: Seq[Forum], persons: Seq[Person]) {
-    writeCsv(new File(csvDir.toFile(), "forums.csv").toPath, forums)
-    writeCsv(new File(csvDir.toFile(), "persons.csv").toPath, persons)
-  }
+    def getUploads(instance: Int): Seq[(String, LocalDateTime)] = {
+      // e.g. C:/tools/uni/pentaho/data/Code/1/Data/1/a0127319
+      new File(codeDir, s"$instance/Data/1").listFiles(dirFilter).map { matrnrDir =>
+        val currentFile = matrnrDir.listFiles(dirFilter).sortBy(_.lastModified()).last
+        (matrnrDir.getName(),LocalDateTime.now())
+      }
+    }
 
+  }
+  def forum() {
+    logger.info("forum")
+
+  }
+  args match {
+    case Array("code") => code()
+    case Array("forum") => forum()
+    case _ => println("Invalid parameters")
+  }
   val (forums, persons) = readForum
-  writeCsv(forums, persons)
 }
