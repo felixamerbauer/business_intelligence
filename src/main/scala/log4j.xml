@@ -14,7 +14,7 @@
 	</category>
 
 	<root>
-		<priority value="warn" />
+		<priority value="debug" />
 		<appender-ref ref="STDOUT" />
 	</root>
 
