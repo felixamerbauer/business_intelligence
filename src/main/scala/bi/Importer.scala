@@ -63,6 +63,9 @@ object Importer extends App with Logging {
         DriverManager.getConnection("jdbc:mysql://localhost/uni_business_intelligence?user=bi&password=bi"),
         new MySQLAdapter))
   }
+
+  def abgabe() {}
+
   logger.info("start")
   def code() {
     logger.info("code")
@@ -156,46 +159,46 @@ object Importer extends App with Logging {
         Forumsbereich(id = -1, bereichsid = id, name = name, beschreibung = beschreibung, forum_id = forumsId)
       }
 
-//    def getPersons(forumsIds: Seq[Int]): Seq[(Int, Seq[Person])] = {
-//      def personsForum(forumsId: Int): Seq[Person] = {
-//        val data = XML.loadFile(new File(forumDir, s"$forumsId/persons.xml"))
-//        data \ "person" map { e =>
-//          val id: String = e.attribute("id")
-//          val name: String = e.attribute("name")
-//          val email: String = e.attribute("email")
-//          Person(id = id,
-//            name = name,
-//            email = email,
-//            geschlecht = None,
-//            dateOfBirth = None,
-//            // differntiate all types
-//            personType = { if (id.startsWith("a")) Student else Lecturer })
-//        }
-//      }
-//      forumsIds.map(e => (e, personsForum(e)))
-//    }
-//
-//    def getReadProgress(forumsIds: Seq[Int]) = {
-//      forumsIds.map { forumsId =>
-//        val dir = new File(forumDir, s"$forumsId/User")
-//        val personDirs = dir.listFiles().filter(_.isDirectory())
-//
-//        for (personDir <- personDirs) yield {
-//          println("Reading from " + personDir.getCanonicalPath())
-//          val readProgressFilter = new FileFilter {
-//            override def accept(file: File) = if ("""\d+""".r.pattern.matcher(file.getName).matches()) true
-//            else {
-//              logger.error("Invalid read progress file " + file.getCanonicalPath())
-//              false
-//            }
-//          }
-//          val readProgress = for (readProgressFile <- personDir.listFiles(readProgressFilter)) yield {
-//            (readProgressFile.getName, Source.fromFile(readProgressFile).getLines.map(_.toInt))
-//          }
-//          (personDir.getName(), readProgress)
-//        }
-//      }
-//    }
+    //    def getPersons(forumsIds: Seq[Int]): Seq[(Int, Seq[Person])] = {
+    //      def personsForum(forumsId: Int): Seq[Person] = {
+    //        val data = XML.loadFile(new File(forumDir, s"$forumsId/persons.xml"))
+    //        data \ "person" map { e =>
+    //          val id: String = e.attribute("id")
+    //          val name: String = e.attribute("name")
+    //          val email: String = e.attribute("email")
+    //          Person(id = id,
+    //            name = name,
+    //            email = email,
+    //            geschlecht = None,
+    //            dateOfBirth = None,
+    //            // differntiate all types
+    //            personType = { if (id.startsWith("a")) Student else Lecturer })
+    //        }
+    //      }
+    //      forumsIds.map(e => (e, personsForum(e)))
+    //    }
+    //
+    //    def getReadProgress(forumsIds: Seq[Int]) = {
+    //      forumsIds.map { forumsId =>
+    //        val dir = new File(forumDir, s"$forumsId/User")
+    //        val personDirs = dir.listFiles().filter(_.isDirectory())
+    //
+    //        for (personDir <- personDirs) yield {
+    //          println("Reading from " + personDir.getCanonicalPath())
+    //          val readProgressFilter = new FileFilter {
+    //            override def accept(file: File) = if ("""\d+""".r.pattern.matcher(file.getName).matches()) true
+    //            else {
+    //              logger.error("Invalid read progress file " + file.getCanonicalPath())
+    //              false
+    //            }
+    //          }
+    //          val readProgress = for (readProgressFile <- personDir.listFiles(readProgressFilter)) yield {
+    //            (readProgressFile.getName, Source.fromFile(readProgressFile).getLines.map(_.toInt))
+    //          }
+    //          (personDir.getName(), readProgress)
+    //        }
+    //      }
+    //    }
 
     val forums = transaction { tForum.toArray }
     val forumsbereiche =
@@ -221,6 +224,7 @@ object Importer extends App with Logging {
   args match {
     case Array("code") => code()
     case Array("forum") => forum()
+    case Array("abage") => abgabe()
     case _ => println("Invalid parameters")
   }
   //  val (forums, persons) = readForum
