@@ -50,15 +50,19 @@ CREATE TABLE `forumsbereich` (
 
 case class Forumsbereich(id: Long, bereichsid: Long, name: String, beschreibung: String, forum_id: Long) extends KeyedEntity[Long]
 
-object Forumsbereich {
-  private val header = s"id${s}name"
-}
-
 case class Posting(id: Long, postingid: Long, datum: Timestamp, betreff_laenge: Int, text_laenge: Int, forumsbereich_id: Long, parent_id: Option[Long]) extends KeyedEntity[Long]
 
-case class CodeTopic(id: Long, name: String, lva_dbid: Int) extends KeyedEntity[Long]
+case class CodeTopic(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
 
 case class CodeUpload(id: Long, zeitstempel: Timestamp, user_id: String, code_topic_id: Int) extends KeyedEntity[Long]
+
+case class Abgabe(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
+
+case class Task(id: Long, kurzbezeichnung: String, beschreibung: String, abgabe_id: Int, beginn: Timestamp, ende: Timestamp, presence: Timestamp, lva_gruppe_id: Long) extends KeyedEntity[Long]
+
+case class Subtask(id: Long, text: String, task_id: Long) extends KeyedEntity[Long]
+
+case class Feedback( /*subtask_*/ id: Long, kommentar: String, autor_id: String, student_id: String) extends KeyedEntity[Long]
 
 object MySchema extends Schema {
   val tCodeTopic = table[CodeTopic]("code_topic")
@@ -81,59 +85,19 @@ object MySchema extends Schema {
   on(tPosting)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
-  //  // ManyToMany Event - Membership
-  //  class EventMembership(val eventId: Long, val membershipId: Long) extends KeyedEntity[CompositeKey2[Long, Long]] {
-  //    override def id = compositeKey(eventId, membershipId)
-  //  }
-  //  val eventsMemberships =
-  //    manyToManyRelation(tEvent, tMembership, "event_membership").
-  //      via[EventMembership]((event, membership, cs) => (cs.eventId === event.id, membership.id === cs.membershipId))
-  //
-  //  // ManyToMany User - Games
-  //  class UserGame(val userId: Long, val gameId: Long, var signedIn: SignedInEnum.SignedInEnum, var comment: String) extends KeyedEntity[CompositeKey2[Long, Long]] {
-  //    //    def this=this(0,0,0,SignedInEnum.Unknown)
-  //    def this() = this(0L, 0L, SignedInEnum.Unknown, "")
-  //
-  //    override def id = compositeKey(userId, gameId)
-  //    def signedInEnum = signedIn
-  //    override def toString = userId + "/" + gameId + "/" + signedInEnum
-  //  }
-  //  val usersGames =
-  //    manyToManyRelation(tUser, tGame, "user_game").
-  //      via[UserGame]((user, game, cs) => (cs.userId === user.id, game.id === cs.gameId))
-  //
-  //  // ManyToMany User - Memberships
-  //  class UserMembership(val userId: Long, val membershipId: Long) extends KeyedEntity[CompositeKey2[Long, Long]] {
-  //    override def id = compositeKey(userId, membershipId)
-  //  }
-  //  val usersMemberships =
-  //    manyToManyRelation(tUser, tMembership, "user_membership").
-  //      via[UserMembership]((user, membership, cs) => (cs.userId === user.id, membership.id === cs.membershipId))
-  //
-  //  //   OneToMany Membership - Game
-  //  val gameMemberships = oneToManyRelation(tMembership, tGame).via((m, g) => g.membershipId === m.id)
-  //
-  //  //   OneToMany User - Game (launderer)
-  //  val gameLaunderers = oneToManyRelation(tUser, tGame).via((u, g) => g.laundererId === u.id)
-  //
-  //  // Joins
-  //  def getEventsMemberships =
-  //    from(tEvent, tMembership, eventsMemberships)((e, m, em) =>
-  //      where(e.id === em.eventId and m.id === em.membershipId)
-  //        select (e, m) orderBy (e.start))
-  //  def getEventsMemberships(eventsAfter: Timestamp) =
-  //    from(tEvent, tMembership, eventsMemberships)((e, m, em) =>
-  //      where(e.id === em.eventId and m.id === em.membershipId and (e.start >= eventsAfter))
-  //        select (e, m) orderBy (e.start))
-  //
-  //  def getEvent(id: Long) = tEvent.where(_.id === id).single
-  //
-  //  def getEventsWithMemberships = getEventsMemberships.asTree.map { e => e._1.memberships2 = e._2.map(_.name); e._1 }.toSeq.sortBy(_.start.getTime)
-  //
-  //  def getEventsWithMemberships(eventsAfter: Timestamp) = getEventsMemberships(eventsAfter).asTree.map { e => e._1.memberships2 = e._2.map(_.name); e._1 }.toSeq.sortBy(_.start.getTime)
-  //
-  //
-  //  def allUsers = from(tUser)(select(_))
-  //
-  //  val allTables = Seq(usersMemberships, usersGames, tGame, tUser, eventsMemberships, tEvent, newsMemberships, tNews, tMembership)
+  val tAbgabe = table[Abgabe]("abgabe")
+  on(tAbgabe)(g => declare(
+    g.id is (primaryKey)))
+
+  val tTask = table[Task]("abgabe")
+  on(tTask)(g => declare(
+    g.id is (primaryKey)))
+
+  val tSubtask = table[Subtask]("subtask")
+  on(tSubtask)(g => declare(
+    g.id is (primaryKey)))
+
+  val tFeedback = table[Feedback]("abgabe")
+  on(tFeedback)(g => declare(
+    g.id is (primaryKey)))
 }
