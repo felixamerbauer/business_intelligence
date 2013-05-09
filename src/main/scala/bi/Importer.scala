@@ -24,12 +24,9 @@ import org.squeryl.adapters.MySQLAdapter
 
 import com.typesafe.scalalogging.slf4j.Logging
 
-import bi.MySchema.tCodeUpload
-import bi.MySchema.tForum
-import bi.MySchema.tForumsbereich
-import bi.MySchema.tPosting
+import bi.MySchema._
 
-import scala.language.implicitConversions
+
 
 /**
  * TODO
@@ -37,6 +34,8 @@ import scala.language.implicitConversions
  */
 
 object Importer extends App with Logging {
+  import language.implicitConversions
+  
   val matrnrRegex = """a\d+""".r
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
 
@@ -64,7 +63,64 @@ object Importer extends App with Logging {
         new MySQLAdapter))
   }
 
-  def abgabe() {}
+  case class Instance(id: Int, name: String, lva: Lva)
+
+  def readInstances(file: File): Seq[Instance] = {
+    val lvas = tLva.toArray
+    val pattern = """(?s)http://[^/]+/[^/]+/([^/]+)/.*(se\d\d)[^:]*:(.*)""".r
+    XML.loadFile(file) \ "instance" map { node =>
+      val id: Int = node.attribute("id")
+      val url: String = node.text
+      println("Checking " + url)
+      val pattern(lvaName, lvaSemester, beschreibung) = url
+      Instance(id = id, name = beschreibung, lva = lvas.find(e => e.name == lvaName && e.semester == lvaSemester).get)
+    }
+  }
+
+  def abgabe() {
+    def processSubtask(node: Node, task: Task) {
+      val id: Int = node.attribute("id")
+      val text: String = (node \ "text").text
+      val toInsert = Subtask(id = -1, subtask_id = id, text = text, task_id = task.id)
+      logger.info("Inserting " + toInsert)
+      val db = tSubtask.insert(toInsert)
+    }
+
+    def processTask(node: Node, abgabe: Abgabe) {
+      // Data of a single posting
+      val id: Int = node.attribute("id")
+      val short: String = node.attribute("short")
+      val long: String = node.attribute("long")
+
+      val toInsert = Task(id = -1, task_id = id, kurzbezeichnung = short, beschreibung = long, abgabe_id = abgabe.id, beginn = new Timestamp(0), ende = new Timestamp(0), presence = new Timestamp(0), lva_gruppe_id = -1)
+      logger.info("Inserting " + toInsert)
+      val db = tTask.insert(toInsert)
+      // Optional subtasks
+      node \ "subtask" foreach { e => processSubtask(e, db) }
+    }
+
+    logger.info("forum")
+    logger.info("emptying tables task, subtask, abgabe")
+    transaction {
+      Seq(tSubtask, tTask, tAbgabe).foreach(_.deleteWhere(_ => 1 === 1))
+    }
+    val abgabeDir = new File(dataDir, "Abgabe")
+    transaction {
+      val instances = readInstances(new File(abgabeDir, "descriptions.xml"))
+      val abgaben = instances.map { e =>
+        val toInsert = new Abgabe(id = e.id, name = e.name, lva_dbid = e.lva.id)
+        logger.info("Inserting " + toInsert)
+        tAbgabe.insert(toInsert)
+      }
+      abgaben foreach { abgabe =>
+        val file = new File(abgabeDir, s"${abgabe.id}/tasks.xml")
+        if (file.exists())
+          XML.loadFile(file) \ "task" foreach { e => processTask(e, abgabe) }
+        else logger.error("Missing file " + file.getCanonicalPath())
+      }
+
+    }
+  }
 
   logger.info("start")
   def code() {
@@ -224,7 +280,7 @@ object Importer extends App with Logging {
   args match {
     case Array("code") => code()
     case Array("forum") => forum()
-    case Array("abage") => abgabe()
+    case Array("abgabe") => abgabe()
     case _ => println("Invalid parameters")
   }
   //  val (forums, persons) = readForum
