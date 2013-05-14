@@ -5,13 +5,11 @@ import java.io.FileFilter
 import java.sql.DriverManager
 import java.sql.Timestamp
 import java.util.Date
-
 import scala.Array.canBuildFrom
 import scala.Array.fallbackCanBuildFrom
 import scala.xml.Node
 import scala.xml.NodeSeq.seqToNodeSeq
 import scala.xml.XML
-
 import org.joda.time.LocalDateTime
 import org.joda.time.format.DateTimeFormat
 import org.squeryl.PrimitiveTypeMode.__thisDsl
@@ -21,12 +19,9 @@ import org.squeryl.PrimitiveTypeMode.view2QueryAll
 import org.squeryl.Session
 import org.squeryl.SessionFactory
 import org.squeryl.adapters.MySQLAdapter
-
 import com.typesafe.scalalogging.slf4j.Logging
-
 import bi.MySchema._
-
-
+import org.joda.time.LocalDate
 
 /**
  * TODO
@@ -35,12 +30,14 @@ import bi.MySchema._
 
 object Importer extends App with Logging {
   import language.implicitConversions
-  
+
   val matrnrRegex = """a\d+""".r
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
+  val df = DateTimeFormat.forPattern("yyyy-MM-dd")
 
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
+  implicit def optionSeqXmlNode2LocalDate(osxn: Option[Seq[Node]]): LocalDate = df.parseLocalDate(optionSeqXmlNode2String(osxn))
   implicit def optionSeqXmlNode2Timestamp(osxn: Option[Seq[Node]]): Timestamp = new Timestamp(dtf.parseLocalDateTime(optionSeqXmlNode2String(osxn)).toDate().getTime())
 
   implicit def localDateTime2Timestamp(ldt: LocalDateTime): Timestamp = new Timestamp(ldt.toDate().getTime())
@@ -99,6 +96,32 @@ object Importer extends App with Logging {
       node \ "subtask" foreach { e => processSubtask(e, db) }
     }
 
+    def processAssessment(node: Node, abgabe: Abgabe) {
+      // user id
+      val userId: String = node.attribute("id")
+      // plus and minus
+      val pluses: Seq[LocalDate] = node \ "plus" map { e =>
+        val date: LocalDate = e.attribute("date")
+        date
+      }
+      val minuses: Seq[LocalDate] = node \ "minus" map { e =>
+        val date: LocalDate = e.attribute("date")
+        date
+      }
+      val sum = pluses.size - minuses.size
+      // TODO Assign to abgabe/uebungseinheit, task_id doesn't make sense
+      val mitarbeit = Mitarbeit(id = -1, plusminus = sum, task_id = -1, user_id = userId)
+      logger.info("Inserting " + mitarbeit)
+      tMitarbeit.insert(mitarbeit)
+
+      // results
+      node \ "result" foreach { e =>
+        val id: Int = e.attribute("id")
+        val result: Double = e.text.toDouble
+      }
+      // TODO
+    }
+
     logger.info("forum")
     logger.info("emptying tables task, subtask, abgabe")
     transaction {
@@ -113,10 +136,17 @@ object Importer extends App with Logging {
         tAbgabe.insert(toInsert)
       }
       abgaben foreach { abgabe =>
-        val file = new File(abgabeDir, s"${abgabe.id}/tasks.xml")
-        if (file.exists())
-          XML.loadFile(file) \ "task" foreach { e => processTask(e, abgabe) }
-        else logger.error("Missing file " + file.getCanonicalPath())
+        // tasks
+        val tasksFile = new File(abgabeDir, s"${abgabe.id}/tasks.xml")
+        if (tasksFile.exists())
+          XML.loadFile(tasksFile) \ "task" foreach { e => processTask(e, abgabe) }
+        else logger.error("Missing file " + tasksFile.getCanonicalPath())
+        // assessments
+        val assessmentsFile = new File(abgabeDir, s"${abgabe.id}/assessments.xml")
+        if (tasksFile.exists())
+          XML.loadFile(tasksFile) \ "person" foreach { e => processAssessment(e, abgabe) }
+        else logger.error("Missing file " + tasksFile.getCanonicalPath())
+
       }
 
     }

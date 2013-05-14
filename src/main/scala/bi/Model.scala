@@ -48,6 +48,8 @@ case class Task(id: Long, task_id: Int, kurzbezeichnung: String, beschreibung: S
 
 case class Subtask(id: Long, subtask_id: Int, text: String, task_id: Long) extends KeyedEntity[Long]
 
+case class Mitarbeit(id: Long, plusminus: Int, task_id: Long, user_id: String) extends KeyedEntity[Long]
+
 case class Feedback( /*subtask_*/ id: Long, kommentar: String, autor_id: String, student_id: String) extends KeyedEntity[Long]
 
 object MySchema extends Schema {
@@ -85,6 +87,10 @@ object MySchema extends Schema {
 
   val tSubtask = table[Subtask]("subtask")
   on(tSubtask)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tMitarbeit = table[Mitarbeit]("mitarbeit")
+  on(tMitarbeit)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
   val tFeedback = table[Feedback]("abgabe")
