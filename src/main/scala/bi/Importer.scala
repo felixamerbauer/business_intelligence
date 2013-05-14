@@ -9,7 +9,7 @@ import scala.Array.canBuildFrom
 import scala.Array.fallbackCanBuildFrom
 import scala.xml.Node
 import scala.xml.NodeSeq.seqToNodeSeq
-import scala.xml.XML
+import scala.xml._
 import org.joda.time.LocalDateTime
 import org.joda.time.format.DateTimeFormat
 import org.squeryl.PrimitiveTypeMode.__thisDsl
@@ -30,10 +30,12 @@ import org.joda.time.LocalDate
 
 object Importer extends App with Logging {
   import language.implicitConversions
+  import language.postfixOps
 
   val matrnrRegex = """a\d+""".r
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
   val df = DateTimeFormat.forPattern("yyyy-MM-dd")
+  val dmyf = DateTimeFormat.forPattern("dd.MM.yyyy")
 
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
@@ -82,7 +84,27 @@ object Importer extends App with Logging {
       logger.info("Inserting " + toInsert)
       val db = tSubtask.insert(toInsert)
     }
+    // tasks.xml /group
+    def processGroup(node: Node, abgabe: Abgabe) {
+      val groupId: Int = node.attribute("id")
+      // Aufgabenzuordung pro Gruppe
+      node \ "task[@from]" foreach { e =>
+        val taskId: Int = e.attribute("id")
+        val from: Timestamp = e.attribute("from")
+        val to: Timestamp = e.attribute("to")
+        val presence = e.attribute("presence")
+      }
 
+      // Test
+      // <test id="1" desc="16.12.2008"/>
+      node \ "task[@desc]" foreach { e =>
+        val descString = e.attribute("desc")
+        val desc = dmyf.parseLocalDate(descString)
+      }
+
+    }
+
+    // tasks.xml /task
     def processTask(node: Node, abgabe: Abgabe) {
       // Data of a single posting
       val id: Int = node.attribute("id")
@@ -113,7 +135,6 @@ object Importer extends App with Logging {
       val mitarbeit = Mitarbeit(id = -1, plusminus = sum, task_id = -1, user_id = userId)
       logger.info("Inserting " + mitarbeit)
       tMitarbeit.insert(mitarbeit)
-
       // results
       node \ "result" foreach { e =>
         val id: Int = e.attribute("id")
@@ -122,12 +143,35 @@ object Importer extends App with Logging {
       // TODO
     }
 
-    logger.info("forum")
+    def processFeedback(node: Node, abgabe: Abgabe) {
+      node \ "person" foreach { person =>
+        val studentId = person.attribute("id")
+        val comment = person \ "comment" head
+        val author: String = comment.attribute("author")
+        val subtaskId: Int = comment.attribute("subtask")
+        val task: String = comment.attribute("task")
+        // check available
+        val text = comment.text
+        // TODO handle subtaskid related to taskId and abgabeId
+        Feedback(id = -1, kommentar = text, autor_id = author, student_id = studentId, subtask_id = subtaskId)
+      }
+    }
+
+    def checkAndReadFile(file: File): Option[Elem] =
+      if (file.exists())
+        Some(XML.loadFile(file))
+      else {
+        logger.error("Missing file " + file.getCanonicalPath())
+        None
+      }
+
+    logger.info("abgabe")
     logger.info("emptying tables task, subtask, abgabe")
     transaction {
       Seq(tSubtask, tTask, tAbgabe).foreach(_.deleteWhere(_ => 1 === 1))
     }
     val abgabeDir = new File(dataDir, "Abgabe")
+
     transaction {
       val instances = readInstances(new File(abgabeDir, "descriptions.xml"))
       val abgaben = instances.map { e =>
@@ -136,17 +180,20 @@ object Importer extends App with Logging {
         tAbgabe.insert(toInsert)
       }
       abgaben foreach { abgabe =>
+        def file(name: String) = new File(abgabeDir, s"${abgabe.id}/$name")
         // tasks
-        val tasksFile = new File(abgabeDir, s"${abgabe.id}/tasks.xml")
-        if (tasksFile.exists())
-          XML.loadFile(tasksFile) \ "task" foreach { e => processTask(e, abgabe) }
-        else logger.error("Missing file " + tasksFile.getCanonicalPath())
+        checkAndReadFile(file("tasks.xml")) foreach { xml =>
+          xml \ "task" foreach { e => processTask(e, abgabe) }
+          xml \ "group" foreach { e => processGroup(e, abgabe) }
+        }
         // assessments
-        val assessmentsFile = new File(abgabeDir, s"${abgabe.id}/assessments.xml")
-        if (tasksFile.exists())
-          XML.loadFile(tasksFile) \ "person" foreach { e => processAssessment(e, abgabe) }
-        else logger.error("Missing file " + tasksFile.getCanonicalPath())
-
+        checkAndReadFile(file("assessments.xml")) foreach {
+          _ \ "person" foreach { e => processAssessment(e, abgabe) }
+        }
+        // feedback
+        checkAndReadFile(file("feedback.xml")) foreach {
+          _ \ "person" foreach { e => processFeedback(e, abgabe) }
+        }
       }
 
     }
@@ -245,6 +292,28 @@ object Importer extends App with Logging {
         Forumsbereich(id = -1, bereichsid = id, name = name, beschreibung = beschreibung, forum_id = forumsId)
       }
 
+    val forums = transaction { tForum.toArray }
+    val forumsbereiche =
+      transaction {
+        val toInsert = forums.flatMap(e => getForumsbereiche(e.id))
+        logger.info("Inserting\n\t" + toInsert.mkString("-" * 30, "\n\t", "-" * 30))
+        tForumsbereich.insert(toInsert)
+        tForumsbereich.toArray
+      }
+    val posting = forumsbereiche.foreach(e => readAndInsertPostings(forumsId = e.forum_id, forumsbereichId = e.bereichsid, forumsbereichDbid = e.id))
+
+  }
+  initDb
+  args match {
+    case Array("code") => code()
+    case Array("forum") => forum()
+    case Array("abgabe") => abgabe()
+    case _ => println("Invalid parameters")
+  }
+  //  val (forums, persons) = readForum
+}
+
+
     //    def getPersons(forumsIds: Seq[Int]): Seq[(Int, Seq[Person])] = {
     //      def personsForum(forumsId: Int): Seq[Person] = {
     //        val data = XML.loadFile(new File(forumDir, s"$forumsId/persons.xml"))
@@ -285,16 +354,6 @@ object Importer extends App with Logging {
     //        }
     //      }
     //    }
-
-    val forums = transaction { tForum.toArray }
-    val forumsbereiche =
-      transaction {
-        val toInsert = forums.flatMap(e => getForumsbereiche(e.id))
-        logger.info("Inserting\n\t" + toInsert.mkString("-" * 30, "\n\t", "-" * 30))
-        tForumsbereich.insert(toInsert)
-        tForumsbereich.toArray
-      }
-    val posting = forumsbereiche.foreach(e => readAndInsertPostings(forumsId = e.forum_id, forumsbereichId = e.bereichsid, forumsbereichDbid = e.id))
     //    val forumIds = forums.map(_.id)
 
     //    val readProgress = getReadProgress(forumIds)
@@ -305,13 +364,3 @@ object Importer extends App with Logging {
 
     //    (forums, /* TODO readProgress*/ personsWithDupes)
 
-  }
-  initDb
-  args match {
-    case Array("code") => code()
-    case Array("forum") => forum()
-    case Array("abgabe") => abgabe()
-    case _ => println("Invalid parameters")
-  }
-  //  val (forums, persons) = readForum
-}

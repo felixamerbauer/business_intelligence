@@ -27,7 +27,7 @@ case class Person(
   dateOfBirth: Option[LocalDate],
   personType: PersonType)
 
-case class Lva(id:Long,name: String, semester: String) extends KeyedEntity[Long]
+case class Lva(id: Long, name: String, semester: String) extends KeyedEntity[Long]
 
 // Forum
 case class Forum(id: Long, langtext: String, lva_dbid: Long) extends KeyedEntity[Long]
@@ -50,14 +50,14 @@ case class Subtask(id: Long, subtask_id: Int, text: String, task_id: Long) exten
 
 case class Mitarbeit(id: Long, plusminus: Int, task_id: Long, user_id: String) extends KeyedEntity[Long]
 
-case class Feedback( /*subtask_*/ id: Long, kommentar: String, autor_id: String, student_id: String) extends KeyedEntity[Long]
+case class Feedback(id: Long, kommentar: String, autor_id: String, student_id: String, subtask_id: Long) extends KeyedEntity[Long]
 
 object MySchema extends Schema {
   val tLva = table[Lva]("lva")
   on(tLva)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
-    val tCodeTopic = table[CodeTopic]("code_topic")
+  val tCodeTopic = table[CodeTopic]("code_topic")
   on(tCodeTopic)(g => declare(
     g.id is (primaryKey)))
 
