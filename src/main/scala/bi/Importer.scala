@@ -43,6 +43,7 @@ object Importer extends App with Logging {
   implicit def optionSeqXmlNode2Timestamp(osxn: Option[Seq[Node]]): Timestamp = new Timestamp(dtf.parseLocalDateTime(optionSeqXmlNode2String(osxn)).toDate().getTime())
 
   implicit def localDateTime2Timestamp(ldt: LocalDateTime): Timestamp = new Timestamp(ldt.toDate().getTime())
+  implicit def localDate2Timestamp(ld: LocalDate): java.sql.Date = new java.sql.Date(ld.toDate().getTime())
   val dataDir = new File("C:/tools/uni/pentaho/data")
 
   import org.squeryl.SessionFactory
@@ -87,13 +88,6 @@ object Importer extends App with Logging {
     // tasks.xml /group
     def processGroup(node: Node, abgabe: Abgabe) {
       val groupId: Int = node.attribute("id")
-      // Aufgabenzuordung pro Gruppe
-      node \ "task[@from]" foreach { e =>
-        val taskId: Int = e.attribute("id")
-        val from: Timestamp = e.attribute("from")
-        val to: Timestamp = e.attribute("to")
-        val presence = e.attribute("presence")
-      }
 
       // Test
       // <test id="1" desc="16.12.2008"/>
@@ -105,17 +99,24 @@ object Importer extends App with Logging {
     }
 
     // tasks.xml /task
-    def processTask(node: Node, abgabe: Abgabe) {
-      // Data of a single posting
-      val id: Int = node.attribute("id")
-      val short: String = node.attribute("short")
-      val long: String = node.attribute("long")
-
-      val toInsert = Task(id = -1, task_id = id, kurzbezeichnung = short, beschreibung = long, abgabe_id = abgabe.id, beginn = new Timestamp(0), ende = new Timestamp(0), presence = new Timestamp(0), lva_gruppe_id = -1)
-      logger.info("Inserting " + toInsert)
-      val db = tTask.insert(toInsert)
-      // Optional subtasks
-      node \ "subtask" foreach { e => processSubtask(e, db) }
+    def processTasks(node: Node, abgabe: Abgabe) {
+      node \ "task" foreach { task =>
+        // Data of a single posting
+        val id: Int = task.attribute("id")
+        val short: String = task.attribute("short")
+        val long: String = task.attribute("long")
+        // Aufgabenzuordung pro Gruppe
+        val groupTask = node \ "group" \ "task" filter { e => val id: String = e.attribute("id"); id == "1" } head
+        val from: Timestamp = groupTask.attribute("from")
+        val to: Timestamp = groupTask.attribute("to")
+        val presence: LocalDate = groupTask.attribute("presence")
+        // TOOD lva_gruppe_id
+        val toInsert = Task(id = -1, task_id = id, kurzbezeichnung = short, beschreibung = long, abgabe_id = abgabe.id, beginn = from, ende = to, presence = presence, lva_gruppe_id = -1)
+        logger.info("Inserting " + toInsert)
+        val db = tTask.insert(toInsert)
+        // Optional subtasks
+        node \ "subtask" foreach { e => processSubtask(e, db) }
+      }
     }
 
     def processAssessment(node: Node, abgabe: Abgabe) {
@@ -183,7 +184,7 @@ object Importer extends App with Logging {
         def file(name: String) = new File(abgabeDir, s"${abgabe.id}/$name")
         // tasks
         checkAndReadFile(file("tasks.xml")) foreach { xml =>
-          xml \ "task" foreach { e => processTask(e, abgabe) }
+          processTasks(xml, abgabe)
           xml \ "group" foreach { e => processGroup(e, abgabe) }
         }
         // assessments

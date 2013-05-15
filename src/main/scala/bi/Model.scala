@@ -7,6 +7,7 @@ import org.squeryl.Schema
 import java.sql.Timestamp
 import org.squeryl.KeyedEntity
 import org.squeryl.PersistenceStatus
+import java.sql.Date
 
 // helpers
 sealed abstract class Sex
@@ -44,7 +45,7 @@ case class CodeUpload(id: Long, zeitstempel: Timestamp, user_id: String, code_to
 // Abgabe
 case class Abgabe(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
 
-case class Task(id: Long, task_id: Int, kurzbezeichnung: String, beschreibung: String, abgabe_id: Long, beginn: Timestamp, ende: Timestamp, presence: Timestamp, lva_gruppe_id: Long) extends KeyedEntity[Long]
+case class Task(id: Long, task_id: Int, kurzbezeichnung: String, beschreibung: String, abgabe_id: Long, beginn: Timestamp, ende: Timestamp, presence: java.util.Date, lva_gruppe_id: Long) extends KeyedEntity[Long]
 
 case class Subtask(id: Long, subtask_id: Int, text: String, task_id: Long) extends KeyedEntity[Long]
 
