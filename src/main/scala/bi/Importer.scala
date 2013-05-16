@@ -269,7 +269,7 @@ object Importer extends App with Logging {
         val betreff = (node \ "subject").text
         val text = (node \ "text").text
         val postingDb = transaction {
-          val postingToInsert = Posting(id = -1, postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = None)
+          val postingToInsert = Posting(id = -1, postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = parent_id, user_id = user)
           logger.info("Inserting " + postingToInsert)
           tPosting.insert(postingToInsert)
         }

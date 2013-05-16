@@ -35,7 +35,7 @@ case class Forum(id: Long, langtext: String, lva_dbid: Long) extends KeyedEntity
 
 case class Forumsbereich(id: Long, bereichsid: Long, name: String, beschreibung: String, forum_id: Long) extends KeyedEntity[Long]
 
-case class Posting(id: Long, postingid: Long, datum: Timestamp, betreff_laenge: Int, text_laenge: Int, forumsbereich_id: Long, parent_id: Option[Long]) extends KeyedEntity[Long]
+case class Posting(id: Long, postingid: Long, datum: Timestamp, betreff_laenge: Int, text_laenge: Int, forumsbereich_id: Long, parent_id: Option[Long], user_id: String) extends KeyedEntity[Long]
 
 // Code
 case class CodeTopic(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
