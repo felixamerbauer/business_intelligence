@@ -31,6 +31,12 @@ import org.joda.time.LocalDate
 object Importer extends App with Logging {
   import language.implicitConversions
   import language.postfixOps
+  val prettyPrinter = new PrettyPrinter(80, 2)
+  def pp(node: Node): String = {
+    val sb = new StringBuilder()
+    prettyPrinter.format(node, sb)
+    sb.toString
+  }
 
   val matrnrRegex = """a\d+""".r
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
@@ -39,6 +45,7 @@ object Importer extends App with Logging {
 
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
+  implicit def optionSeqXmlNode2Long(osxn: Option[Seq[Node]]): Long = optionSeqXmlNode2String(osxn).toLong
   implicit def optionSeqXmlNode2LocalDate(osxn: Option[Seq[Node]]): LocalDate = df.parseLocalDate(optionSeqXmlNode2String(osxn))
   implicit def optionSeqXmlNode2Timestamp(osxn: Option[Seq[Node]]): Timestamp = new Timestamp(dtf.parseLocalDateTime(optionSeqXmlNode2String(osxn)).toDate().getTime())
 
@@ -53,28 +60,6 @@ object Importer extends App with Logging {
   }
   val nonDirFilter = new FileFilter {
     override def accept(file: File) = !file.isDirectory()
-  }
-
-  def initDb {
-    Class.forName("com.mysql.jdbc.Driver");
-    SessionFactory.concreteFactory = Some(() =>
-      Session.create(
-        DriverManager.getConnection("jdbc:mysql://localhost/uni_business_intelligence?user=bi&password=bi"),
-        new MySQLAdapter))
-  }
-
-  case class Instance(id: Int, name: String, lva: Lva)
-
-  def readInstances(file: File): Seq[Instance] = {
-    val lvas = tLva.toArray
-    val pattern = """(?s)http://[^/]+/[^/]+/([^/]+)/.*(se\d\d)[^:]*:(.*)""".r
-    XML.loadFile(file) \ "instance" map { node =>
-      val id: Int = node.attribute("id")
-      val url: String = node.text
-      println("Checking " + url)
-      val pattern(lvaName, lvaSemester, beschreibung) = url
-      Instance(id = id, name = beschreibung, lva = lvas.find(e => e.name == lvaName && e.semester == lvaSemester).get)
-    }
   }
 
   def abgabe() {
@@ -157,14 +142,6 @@ object Importer extends App with Logging {
         Feedback(id = -1, kommentar = text, autor_id = author, student_id = studentId, subtask_id = subtaskId)
       }
     }
-
-    def checkAndReadFile(file: File): Option[Elem] =
-      if (file.exists())
-        Some(XML.loadFile(file))
-      else {
-        logger.error("Missing file " + file.getCanonicalPath())
-        None
-      }
 
     logger.info("abgabe")
     logger.info("emptying tables task, subtask, abgabe")
@@ -304,8 +281,118 @@ object Importer extends App with Logging {
     val posting = forumsbereiche.foreach(e => readAndInsertPostings(forumsId = e.forum_id, forumsbereichId = e.bereichsid, forumsbereichDbid = e.id))
 
   }
+
+  def registrierung() {
+    logger.info("registrierung")
+    logger.info("emptying tables user_gruppe, slot, register_gruppe, registrierung")
+    transaction {
+      Seq(tUserGruppe, tSlot, tRegisterGruppe, tRegistrierung).foreach(_.deleteWhere(_ => 1 === 1))
+    }
+    val registerDir = new File(dataDir, "Register")
+
+    transaction {
+      val userIds = tUser.toArray.map(_.id).toSet
+      readInstances(new File(registerDir, "descriptions.xml")) foreach { instance =>
+        val toInsert = new Registrierung(id = instance.id, name = instance.name, lva_dbid = instance.lva.id)
+        logger.info("Inserting " + toInsert)
+        val registrierung = tRegistrierung.insert(toInsert)
+
+        def file(name: String) = new File(registerDir, s"${registrierung.id}/$name")
+
+        // <group id="3" title="Anmeldung ...">
+        def processRegisterGruppe(node: Node) {
+        }
+
+        // register Gruppe
+        val registerGruppen = (checkAndReadFile(file("custom.xml")) map { xml =>
+          xml \ "group" map { e =>
+            val toInsert = RegisterGruppe(gruppe_id = e.attribute("id"), title = e.attribute("title"), registrierung_id = registrierung.id)
+            logger.info("Inserting " + toInsert)
+            tRegisterGruppe.insert(toInsert)
+          }
+        }).getOrElse(Seq())
+        // todo
+        checkAndReadFile(file("registrations.xml")) foreach { xml =>
+          xml \ "registration" foreach { e =>
+            val group: Int = e.attribute("group")
+            val userId: String = e.text
+            val slot: Int = e.attribute("slot")
+            // user_gruppe
+            (userIds.contains(userId), registerGruppen.find(_.gruppe_id == group)) match {
+              case (true, Some(registerGruppe)) =>
+                val userGruppe = UserGruppe(user_id = userId, register_gruppe_id = registerGruppe.id)
+                logger.info("Inserting " + userGruppe)
+                tUserGruppe.insert(userGruppe)
+              case (_, None) => logger.error(s"No register gruppe for group $group slot $slot userId $userId registrierung $registrierung")
+              case (false, _) => logger.error(s"Unknow user for group $group slot $slot userId $userId registrierung $registrierung")
+            }
+          }
+          // slot
+          val slots = for {
+            node <- xml \ "registration"
+            group: Int = node.attribute("group")
+            slot: Int = node.attribute("slot")
+            registerGruppe = registerGruppen.find(_.gruppe_id == group)
+            if (registerGruppe.isDefined)
+          } yield (slot, registerGruppe.get)
+
+          for ((slot, data) <- slots.groupBy(_._1)) {
+            val registerGruppe = data.head._2
+            val toInsert = Slot(slot_id = slot, start = None, ende = None, register_gruppe_id = registerGruppe.id)
+            logger.info("Inserting " + toInsert)
+            tSlot.insert(toInsert)
+          }
+
+          //          xml \ "group" foreach { e => processGroup(e, abgabe) }
+        }
+        //        // assessments
+        //        checkAndReadFile(file("assessments.xml")) foreach {
+        //          _ \ "person" foreach { e => processAssessment(e, abgabe) }
+        //        }
+        //        // feedback
+        //        checkAndReadFile(file("feedback.xml")) foreach {
+        //          _ \ "person" foreach { e => processFeedback(e, abgabe) }
+        //        }
+      }
+
+    }
+
+  }
+  // Helper Methods
+  def checkAndReadFile(file: File): Option[Elem] =
+    if (file.exists())
+      Some(XML.loadFile(file))
+    else {
+      logger.error("Missing file " + file.getCanonicalPath())
+      None
+    }
+
+  def initDb {
+    Class.forName("com.mysql.jdbc.Driver");
+    SessionFactory.concreteFactory = Some(() =>
+      Session.create(
+        DriverManager.getConnection("jdbc:mysql://localhost/uni_business_intelligence?user=bi&password=bi"),
+        new MySQLAdapter))
+  }
+
+  case class Instance(id: Int, name: String, lva: Lva)
+
+  def readInstances(file: File): Seq[Instance] = {
+    val lvas = tLva.toArray
+    val pattern = """(?s)http://[^/]+/[^/]+/([^/]+)/.*(se\d\d)[^:]*:(.*)""".r
+    XML.loadFile(file) \ "instance" map { node =>
+      val id: Int = node.attribute("id")
+      val url: String = node.text
+      println("Checking " + url)
+      val pattern(lvaName, lvaSemester, beschreibung) = url
+      Instance(id = id, name = beschreibung, lva = lvas.find(e => e.name == lvaName && e.semester == lvaSemester).get)
+    }
+  }
+
+  // Program start
   initDb
   args match {
+    case Array("registrierung") => registrierung()
     case Array("code") => code()
     case Array("forum") => forum()
     case Array("abgabe") => abgabe()
