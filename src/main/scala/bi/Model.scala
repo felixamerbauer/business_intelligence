@@ -16,11 +16,13 @@ case class Lva(id: Long, name: String, semester: String) extends KeyedEntity[Lon
 // Registrierung
 case class Registrierung(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
 
-case class RegisterGruppe(id: Long = -1, gruppe_id: Long, title: String, registrierung_id: Long) extends KeyedEntity[Long]
+case class RegisterGruppe(id: Long = -1, gruppe_id: Long, title: String, registrierung_id: Long, beginn: Option[Timestamp], ende: Option[Timestamp]) extends KeyedEntity[Long]
 
-case class Slot(id: Long= -1, slot_id: Int, start: Option[Date], ende: Option[Date], register_gruppe_id: Long) extends KeyedEntity[Long]
+case class Slot(id: Long = -1, slot_id: Int, unit: Int, start: Option[String], ende: Option[String], register_gruppe_id: Long) extends KeyedEntity[Long]
 
 case class UserGruppe(id: Long = -1, user_id: String, register_gruppe_id: Long) extends KeyedEntity[Long]
+
+case class UserSlot(id: Long = -1, user_id: String, slot_id: Long) extends KeyedEntity[Long]
 
 // Forum
 case class Forum(id: Long, langtext: String, lva_dbid: Long) extends KeyedEntity[Long]
@@ -108,5 +110,9 @@ object MySchema extends Schema {
 
   val tUserGruppe = table[UserGruppe]("user_gruppe")
   on(tUserGruppe)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tUserSlot = table[UserSlot]("user_slot")
+  on(tUserSlot)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 }

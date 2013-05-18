@@ -42,6 +42,7 @@ object Importer extends App with Logging {
   val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
   val df = DateTimeFormat.forPattern("yyyy-MM-dd")
   val dmyf = DateTimeFormat.forPattern("dd.MM.yyyy")
+  val tf = DateTimeFormat.forPattern("HH:mm")
 
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
@@ -284,9 +285,9 @@ object Importer extends App with Logging {
 
   def registrierung() {
     logger.info("registrierung")
-    logger.info("emptying tables user_gruppe, slot, register_gruppe, registrierung")
+    logger.info("emptying tables user_slot, user_gruppe, slot, register_gruppe, registrierung")
     transaction {
-      Seq(tUserGruppe, tSlot, tRegisterGruppe, tRegistrierung).foreach(_.deleteWhere(_ => 1 === 1))
+      Seq(tUserSlot, tUserGruppe, tSlot, tRegisterGruppe, tRegistrierung).foreach(_.deleteWhere(_ => 1 === 1))
     }
     val registerDir = new File(dataDir, "Register")
 
@@ -305,12 +306,27 @@ object Importer extends App with Logging {
 
         // register Gruppe
         val registerGruppen = (checkAndReadFile(file("custom.xml")) map { xml =>
+          val (beginn, ende) = (xml \ "register" map { e =>
+            val beginn: Timestamp = e.attribute("begin-reg")
+            val ende: Timestamp = e.attribute("end-reg")
+            (beginn, ende)
+          }).head
+          val beginnEndeGruppen = (xml \ "register" \ "group" map { e =>
+            val id: Int = e.attribute("id")
+            id
+          }).toSet
+
           xml \ "group" map { e =>
-            val toInsert = RegisterGruppe(gruppe_id = e.attribute("id"), title = e.attribute("title"), registrierung_id = registrierung.id)
+            val id: Int = e.attribute("id")
+            val (beginnGruppe, endeGruppe) = if (beginnEndeGruppen.isEmpty || beginnEndeGruppen.contains(id)) {
+              (Some(beginn), Some(ende))
+            } else { (None, None) }
+            val toInsert = RegisterGruppe(gruppe_id = id, title = e.attribute("title"), registrierung_id = registrierung.id, beginn = beginnGruppe, ende = endeGruppe)
             logger.info("Inserting " + toInsert)
             tRegisterGruppe.insert(toInsert)
           }
         }).getOrElse(Seq())
+
         // todo
         checkAndReadFile(file("registrations.xml")) foreach { xml =>
           xml \ "registration" foreach { e =>
@@ -327,32 +343,40 @@ object Importer extends App with Logging {
               case (false, _) => logger.error(s"Unknow user for group $group slot $slot userId $userId registrierung $registrierung")
             }
           }
-          // slot
-          val slots = for {
+          // slots from registration
+          for {
             node <- xml \ "registration"
             group: Int = node.attribute("group")
             slot: Int = node.attribute("slot")
+            unit: Int = node.attribute("unit")
+            userId: String = node.text
             registerGruppe = registerGruppen.find(_.gruppe_id == group)
             if (registerGruppe.isDefined)
-          } yield (slot, registerGruppe.get)
-
-          for ((slot, data) <- slots.groupBy(_._1)) {
-            val registerGruppe = data.head._2
-            val toInsert = Slot(slot_id = slot, start = None, ende = None, register_gruppe_id = registerGruppe.id)
-            logger.info("Inserting " + toInsert)
-            tSlot.insert(toInsert)
+            if (userIds.contains(userId))
+          } {
+            val slotToInsert = Slot(slot_id = slot, unit = unit, start = None, ende = None, register_gruppe_id = registerGruppe.get.id)
+            logger.info("Inserting " + slotToInsert)
+            val slotDb = tSlot.insert(slotToInsert)
+            val userSlotToInsert = UserSlot(user_id = userId, slot_id = slotDb.id)
+            logger.info("Inserting " + userSlotToInsert)
+            tUserSlot.insert(userSlotToInsert)
           }
-
-          //          xml \ "group" foreach { e => processGroup(e, abgabe) }
         }
-        //        // assessments
-        //        checkAndReadFile(file("assessments.xml")) foreach {
-        //          _ \ "person" foreach { e => processAssessment(e, abgabe) }
-        //        }
-        //        // feedback
-        //        checkAndReadFile(file("feedback.xml")) foreach {
-        //          _ \ "person" foreach { e => processFeedback(e, abgabe) }
-        //        }
+        // additional slot info from custom.xml
+//        val slotsDb = tSlot.toArray
+//        checkAndReadFile(file("custom.xml")) foreach { xml =>
+//          xml \ "group" foreach { group =>
+//            val groupId:Int = group.attribute("id")
+//            group \ "slot" foreach { slot =>
+//              slot.text.split("-") match {
+//                case Array(from, to) => 
+//                  tSlot.find(e=> e.)
+//                case _ => logger.error("Unexpected slot content in custom.xml " + slot.text)
+//              }
+//            }
+//          }
+//        }
+
       }
 
     }
