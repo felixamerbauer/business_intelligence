@@ -12,7 +12,7 @@ import scala.xml.NodeSeq.seqToNodeSeq
 import scala.xml._
 import org.joda.time.LocalDateTime
 import org.joda.time.format.DateTimeFormat
-import org.squeryl.PrimitiveTypeMode.__thisDsl
+import org.squeryl.PrimitiveTypeMode._
 import org.squeryl.PrimitiveTypeMode.int2ScalarInt
 import org.squeryl.PrimitiveTypeMode.transaction
 import org.squeryl.PrimitiveTypeMode.view2QueryAll
@@ -64,97 +64,157 @@ object Importer extends App with Logging {
   }
 
   def abgabe() {
-    def processSubtask(node: Node, task: Task) {
-      val id: Int = node.attribute("id")
-      val text: String = (node \ "text").text
-      val toInsert = Subtask(id = -1, subtask_id = id, text = text, task_id = task.id)
+    val userIds = transaction { tUser.toArray.map(_.id).toSet }
+    val abgabeDir = new File(dataDir, "Abgabe")
+
+    // tasks.xml /tasks/task/subtask
+    def processSubtask(node: Node, task: AbgabeTask) {
+      val toInsert = AbgabeSubtask(subtask_id = node.attribute("id"), text = (node \ "text").text, task_id = task.id)
       logger.info("Inserting " + toInsert)
-      val db = tSubtask.insert(toInsert)
+      val db = tAbgabeSubtask.insert(toInsert)
     }
-    // tasks.xml /group
+
+    // tasks.xml /tasks
     def processGroup(node: Node, abgabe: Abgabe) {
-      val groupId: Int = node.attribute("id")
-
-      // Test
-      // <test id="1" desc="16.12.2008"/>
-      node \ "task[@desc]" foreach { e =>
-        val descString = e.attribute("desc")
-        val desc = dmyf.parseLocalDate(descString)
+      node \ "group" foreach { e =>
+        val toInsert = AbgabeGruppe(gruppe_id = e.attribute("id"), abgabe_id = abgabe.id)
+        logger.info("Inserting " + toInsert)
+        val abgabeGruppe = tAbgabeGruppe.insert(toInsert)
+        // Test
+        // <test id="1" desc="16.12.2008"/>
+        e \ "test" foreach { e =>
+          val toInsert = AbgabeTest(abgabe_gruppe_id = abgabeGruppe.id, test_id = e.attribute("id"), beschreibung = e.attribute("desc"))
+          logger.info("Inserting " + toInsert)
+          tAbgabeTest.insert(toInsert)
+        }
       }
-
     }
 
-    // tasks.xml /task
+    // tasks.xml /tasks
     def processTasks(node: Node, abgabe: Abgabe) {
       node \ "task" foreach { task =>
-        // Data of a single posting
+        // Data of a single task
         val id: Int = task.attribute("id")
         val short: String = task.attribute("short")
         val long: String = task.attribute("long")
         // Aufgabenzuordung pro Gruppe
-        val groupTask = node \ "group" \ "task" filter { e => val id: String = e.attribute("id"); id == "1" } head
-        val from: Timestamp = groupTask.attribute("from")
-        val to: Timestamp = groupTask.attribute("to")
-        val presence: LocalDate = groupTask.attribute("presence")
-        // TOOD lva_gruppe_id
-        val toInsert = Task(id = -1, task_id = id, kurzbezeichnung = short, beschreibung = long, abgabe_id = abgabe.id, beginn = from, ende = to, presence = presence, lva_gruppe_id = -1)
+        val groupTask = node \ "group" \ "task" find { e =>
+          val groupTaskId: String = e.attribute("id");
+          groupTaskId == id
+        }
+
+        val (from, to, presence) = if (groupTask.isDefined) {
+          val f: Timestamp = groupTask.get.attribute("from")
+          val t: Timestamp = groupTask.get.attribute("to")
+          val p: LocalDate = groupTask.get.attribute("presence")
+          (Some(f), Some(t), Some(p))
+        } else (None, None, None)
+        val toInsert = AbgabeTask(task_id = id, kurzbezeichnung = short, beschreibung = long, abgabe_id = abgabe.id, beginn = from, ende = to, presence = presence.map(_.toDate()))
         logger.info("Inserting " + toInsert)
-        val db = tTask.insert(toInsert)
+        val db = tAbgabeTask.insert(toInsert)
         // Optional subtasks
-        node \ "subtask" foreach { e => processSubtask(e, db) }
+        task \ "subtask" foreach { e => processSubtask(e, db) }
       }
     }
 
     def processAssessment(node: Node, abgabe: Abgabe) {
-      // user id
       val userId: String = node.attribute("id")
-      // plus and minus
-      val pluses: Seq[LocalDate] = node \ "plus" map { e =>
-        val date: LocalDate = e.attribute("date")
-        date
+      if (!userIds.contains(userId)) {
+        logger.error(s"Unknown user id $userId in assessments.xml")
+      } else {
+        // plus and minus
+        val pluses: Seq[LocalDate] = node \ "plus" map { e =>
+          val date: LocalDate = e.attribute("date")
+          date
+        }
+        val minuses: Seq[LocalDate] = node \ "minus" map { e =>
+          val date: LocalDate = e.attribute("date")
+          date
+        }
+        val sum = pluses.size - minuses.size
+        val mitarbeit = AbgabeMitarbeit(plusminus = sum, abgabe_id = abgabe.id, user_id = userId)
+        logger.info("Inserting " + mitarbeit)
+        tAbgabeMitarbeit.insert(mitarbeit)
+        // results
+        val abgabeGruppen = tAbgabeGruppe.where(_.abgabe_id === abgabe.id).toArray
+        val abgabeTests = tAbgabeTest.where(_.abgabe_gruppe_id in abgabeGruppen.map(_.id).toSeq).toArray
+        node \ "result" foreach { result =>
+          val id: Int = result.attribute("id")
+          abgabeTests.filter(_.test_id == id) foreach { abgabeTest =>
+            val abgabeTestUser = AbgabeTestUser(abgabe_test_id = abgabeTest.id, user_id = userId, result = result.text.toFloat)
+            logger.info("Inserting " + abgabeTestUser)
+            tAbgabeTestUser.insert(abgabeTestUser)
+          }
+        }
       }
-      val minuses: Seq[LocalDate] = node \ "minus" map { e =>
-        val date: LocalDate = e.attribute("date")
-        date
-      }
-      val sum = pluses.size - minuses.size
-      // TODO Assign to abgabe/uebungseinheit, task_id doesn't make sense
-      val mitarbeit = Mitarbeit(id = -1, plusminus = sum, task_id = -1, user_id = userId)
-      logger.info("Inserting " + mitarbeit)
-      tMitarbeit.insert(mitarbeit)
-      // results
-      node \ "result" foreach { e =>
-        val id: Int = e.attribute("id")
-        val result: Double = e.text.toDouble
-      }
-      // TODO
     }
 
     def processFeedback(node: Node, abgabe: Abgabe) {
+      // fetch all tasks and subtask for the current abgabe
+      val tasksSubtasks = (from(tAbgabeTask, tAbgabeSubtask)((t, s) =>
+        where(t.abgabe_id === abgabe.id and t.id === s.task_id)
+          select (t, s))).toArray
+      logger.info("Tasks Subtasks " + tasksSubtasks.length)
       node \ "person" foreach { person =>
         val studentId = person.attribute("id")
-        val comment = person \ "comment" head
-        val author: String = comment.attribute("author")
-        val subtaskId: Int = comment.attribute("subtask")
-        val task: String = comment.attribute("task")
-        // check available
-        val text = comment.text
-        // TODO handle subtaskid related to taskId and abgabeId
-        Feedback(id = -1, kommentar = text, autor_id = author, student_id = studentId, subtask_id = subtaskId)
+        person \ "comment" foreach { comment =>
+          val author: String = comment.attribute("author")
+          val subtask: Int = comment.attribute("subtask")
+          val task: Int = comment.attribute("task")
+          val subtaskId = tasksSubtasks.find(e => e._1.task_id == task && e._2.subtask_id == subtask).map(_._2.id).get
+          val abgabeFeedback = AbgabeFeedback(autor_id = author, student_id = studentId, subtask_id = subtaskId)
+          if (!userIds.contains(studentId)) {
+            logger.info("Unknown student id for abgabeFeedback " + studentId)
+          } else {
+            logger.info("Inserting " + abgabeFeedback)
+            tAbgabeFeedback.insert(abgabeFeedback)
+          }
+        }
+      }
+    }
+
+    def processUploads(abgabe: Abgabe) {
+      // fetch all tasks and subtask for the current abgabe
+      val tasksSubtasks = (from(tAbgabeTask, tAbgabeSubtask)((t, s) =>
+        where(t.abgabe_id === abgabe.id and t.id === s.task_id)
+          select (t, s))).toArray
+      logger.info("Tasks Subtasks " + tasksSubtasks.length)
+      val dataDir = new File(abgabeDir, s"${abgabe.id}/Data")
+      if (!dataDir.isDirectory()) {
+        logger.error("No code uploads for abgabe " + abgabe + " as dir doesn't exist " + dataDir)
+      } else {
+        for {
+          userDir <- dataDir.listFiles(dirFilter)
+          userId = userDir.getName()
+          taskDir <- userDir.listFiles(dirFilter)
+          task = taskDir.getName().toInt
+          subtaskDir <- taskDir.listFiles(dirFilter)
+          subtask = subtaskDir.getName().toInt
+        } {
+          subtaskDir.listFiles(nonDirFilter) match {
+            case Array(file, _) =>
+              val zeitpunkt = new Timestamp(file.lastModified())
+              val subtaskId = tasksSubtasks.find(e => e._1.task_id == task && e._2.subtask_id == subtask).map(_._2.id).get
+              val abgabeUpload = AbgabeUpload(zeitpunkt = zeitpunkt, subtask_id = subtaskId, user_id = userId)
+              logger.info("Inserting " + abgabeUpload)
+              tAbgabeUpload.insert(abgabeUpload)
+            case _ =>
+          }
+        }
       }
     }
 
     logger.info("abgabe")
-    logger.info("emptying tables task, subtask, abgabe")
     transaction {
-      Seq(tSubtask, tTask, tAbgabe).foreach(_.deleteWhere(_ => 1 === 1))
+      val tables = Seq(tAbgabeTestUser, tAbgabeFeedback, tAbgabeUpload, tAbgabeTest, tAbgabeSubtask, tAbgabeTask, tAbgabeMitarbeit, tAbgabeGruppe, tAbgabe)
+      logger.info("emptying tables " + tables.map(_.name).mkString(", "))
+      tables.foreach(_.deleteWhere(_ => 1 === 1))
     }
-    val abgabeDir = new File(dataDir, "Abgabe")
 
     transaction {
       val instances = readInstances(new File(abgabeDir, "descriptions.xml"))
       val abgaben = instances.map { e =>
-        val toInsert = new Abgabe(id = e.id, name = e.name, lva_dbid = e.lva.id)
+        val toInsert = new Abgabe(id = e.id, name = e.name, lva_id = e.lva.id)
         logger.info("Inserting " + toInsert)
         tAbgabe.insert(toInsert)
       }
@@ -163,16 +223,18 @@ object Importer extends App with Logging {
         // tasks
         checkAndReadFile(file("tasks.xml")) foreach { xml =>
           processTasks(xml, abgabe)
-          xml \ "group" foreach { e => processGroup(e, abgabe) }
+          processGroup(xml, abgabe)
         }
         // assessments
         checkAndReadFile(file("assessments.xml")) foreach {
           _ \ "person" foreach { e => processAssessment(e, abgabe) }
         }
         // feedback
-        checkAndReadFile(file("feedback.xml")) foreach {
-          _ \ "person" foreach { e => processFeedback(e, abgabe) }
+        checkAndReadFile(file("feedback.xml")) foreach { e =>
+          processFeedback(e, abgabe)
         }
+        // uploads
+        processUploads(abgabe)
       }
 
     }
@@ -363,19 +425,19 @@ object Importer extends App with Logging {
           }
         }
         // additional slot info from custom.xml
-//        val slotsDb = tSlot.toArray
-//        checkAndReadFile(file("custom.xml")) foreach { xml =>
-//          xml \ "group" foreach { group =>
-//            val groupId:Int = group.attribute("id")
-//            group \ "slot" foreach { slot =>
-//              slot.text.split("-") match {
-//                case Array(from, to) => 
-//                  tSlot.find(e=> e.)
-//                case _ => logger.error("Unexpected slot content in custom.xml " + slot.text)
-//              }
-//            }
-//          }
-//        }
+        //        val slotsDb = tSlot.toArray
+        //        checkAndReadFile(file("custom.xml")) foreach { xml =>
+        //          xml \ "group" foreach { group =>
+        //            val groupId:Int = group.attribute("id")
+        //            group \ "slot" foreach { slot =>
+        //              slot.text.split("-") match {
+        //                case Array(from, to) => 
+        //                  tSlot.find(e=> e.)
+        //                case _ => logger.error("Unexpected slot content in custom.xml " + slot.text)
+        //              }
+        //            }
+        //          }
+        //        }
 
       }
 
@@ -383,13 +445,15 @@ object Importer extends App with Logging {
 
   }
   // Helper Methods
-  def checkAndReadFile(file: File): Option[Elem] =
+  def checkAndReadFile(file: File): Option[Elem] = {
+    logger.info("checkAndReadFile " + file.getCanonicalPath())
     if (file.exists())
       Some(XML.loadFile(file))
     else {
       logger.error("Missing file " + file.getCanonicalPath())
       None
     }
+  }
 
   def initDb {
     Class.forName("com.mysql.jdbc.Driver");

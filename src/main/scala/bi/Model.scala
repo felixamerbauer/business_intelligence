@@ -37,15 +37,25 @@ case class CodeTopic(id: Long, name: String, lva_dbid: Long) extends KeyedEntity
 case class CodeUpload(id: Long, zeitstempel: Timestamp, user_id: String, code_topic_id: Int) extends KeyedEntity[Long]
 
 // Abgabe
-case class Abgabe(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
+case class Abgabe(id: Long, name: String, lva_id: Long) extends KeyedEntity[Long]
 
-case class Task(id: Long, task_id: Int, kurzbezeichnung: String, beschreibung: String, abgabe_id: Long, beginn: Timestamp, ende: Timestamp, presence: Date, lva_gruppe_id: Long) extends KeyedEntity[Long]
+case class AbgabeFeedback(id: Long = -1, autor_id: String, student_id: String, subtask_id: Long) extends KeyedEntity[Long]
 
-case class Subtask(id: Long, subtask_id: Int, text: String, task_id: Long) extends KeyedEntity[Long]
+case class AbgabeGruppe(id: Long = -1, gruppe_id: Int, abgabe_id: Long) extends KeyedEntity[Long]
 
-case class Mitarbeit(id: Long, plusminus: Int, task_id: Long, user_id: String) extends KeyedEntity[Long]
+case class AbgabeMitarbeit(id: Long = -1, plusminus: Int, abgabe_id: Long, user_id: String) extends KeyedEntity[Long]
 
-case class Feedback(id: Long, kommentar: String, autor_id: String, student_id: String, subtask_id: Long) extends KeyedEntity[Long]
+case class AbgabeTask(id: Long = -1, task_id: Int, kurzbezeichnung: String, beschreibung: String, abgabe_id: Long, beginn: Option[Timestamp], ende: Option[Timestamp], presence: Option[Date]) extends KeyedEntity[Long]
+
+case class AbgabeSubtask(id: Long = -1, subtask_id: Int, text: String, task_id: Long) extends KeyedEntity[Long] {
+  override def toString = s"id $id, subtask_id $subtask_id, task_id $task_id"
+}
+
+case class AbgabeTest(id: Long = -1, abgabe_gruppe_id: Long, test_id: Long, beschreibung: String) extends KeyedEntity[Long]
+
+case class AbgabeTestUser(id: Long = -1, abgabe_test_id: Long, user_id: String, result: Float) extends KeyedEntity[Long]
+
+case class AbgabeUpload(id: Long = -1, zeitpunkt: Timestamp, subtask_id: Long, user_id: String) extends KeyedEntity[Long]
 
 object MySchema extends Schema {
   val tUser = table[User]("user")
@@ -56,6 +66,7 @@ object MySchema extends Schema {
   on(tLva)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
+  // Code
   val tCodeTopic = table[CodeTopic]("code_topic")
   on(tCodeTopic)(g => declare(
     g.id is (primaryKey)))
@@ -64,6 +75,7 @@ object MySchema extends Schema {
   on(tCodeUpload)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
+  // Forum
   val tForum = table[Forum]("forum")
   on(tForum)(g => declare(
     g.id is (primaryKey)))
@@ -76,26 +88,44 @@ object MySchema extends Schema {
   on(tPosting)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
+  // Abgabe
   val tAbgabe = table[Abgabe]("abgabe")
   on(tAbgabe)(g => declare(
     g.id is (primaryKey)))
 
-  val tTask = table[Task]("task")
-  on(tTask)(g => declare(
+  val tAbgabeFeedback = table[AbgabeFeedback]("abgabe_feedback")
+  on(tAbgabeFeedback)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
-  val tSubtask = table[Subtask]("subtask")
-  on(tSubtask)(g => declare(
+  val tAbgabeGruppe = table[AbgabeGruppe]("abgabe_gruppe")
+  on(tAbgabeGruppe)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
-  val tMitarbeit = table[Mitarbeit]("mitarbeit")
-  on(tMitarbeit)(g => declare(
+  val tAbgabeMitarbeit = table[AbgabeMitarbeit]("abgabe_mitarbeit")
+  on(tAbgabeMitarbeit)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
-  val tFeedback = table[Feedback]("abgabe")
-  on(tFeedback)(g => declare(
-    g.id is (primaryKey)))
+  val tAbgabeTask = table[AbgabeTask]("abgabe_task")
+  on(tAbgabeTask)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
 
+  val tAbgabeSubtask = table[AbgabeSubtask]("abgabe_subtask")
+  on(tAbgabeSubtask)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tAbgabeTest = table[AbgabeTest]("abgabe_test")
+  on(tAbgabeTest)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tAbgabeTestUser = table[AbgabeTestUser]("abgabe_test_user")
+  on(tAbgabeTestUser)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tAbgabeUpload = table[AbgabeUpload]("abgabe_upload")
+  on(tAbgabeUpload)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  // Registrierung
   val tRegistrierung = table[Registrierung]("registrierung")
   on(tRegistrierung)(g => declare(
     g.id is (primaryKey)))
