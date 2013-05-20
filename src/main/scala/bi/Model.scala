@@ -24,12 +24,17 @@ case class UserGruppe(id: Long = -1, user_id: String, register_gruppe_id: Long) 
 
 case class UserSlot(id: Long = -1, user_id: String, slot_id: Long) extends KeyedEntity[Long]
 
+// helper table
+case class RegistrierungUser(id: Long = -1, registrierung_id: Long, user_id: String, name: String, lva_id: Long) extends KeyedEntity[Long]
+
 // Forum
 case class Forum(id: Long, langtext: String, lva_dbid: Long) extends KeyedEntity[Long]
 
-case class Forumsbereich(id: Long, bereichsid: Long, name: String, beschreibung: String, forum_id: Long) extends KeyedEntity[Long]
+case class Forumsbereich(id: Long = -1, bereichsid: Long, name: String, beschreibung: String, forum_id: Long) extends KeyedEntity[Long]
 
-case class Posting(id: Long, postingid: Long, datum: Timestamp, betreff_laenge: Int, text_laenge: Int, forumsbereich_id: Long, parent_id: Option[Long], user_id: String) extends KeyedEntity[Long]
+case class Posting(id: Long = -1, postingid: Long, datum: Timestamp, betreff_laenge: Int, text_laenge: Int, forumsbereich_id: Long, parent_id: Option[Long], user_id: String) extends KeyedEntity[Long]
+
+case class PostingRead(id: Long = -1, posting_id: Long, user_id: String) extends KeyedEntity[Long]
 
 // Code
 case class CodeTopic(id: Long, name: String, lva_dbid: Long) extends KeyedEntity[Long]
@@ -86,6 +91,10 @@ object MySchema extends Schema {
 
   val tPosting = table[Posting]("posting")
   on(tPosting)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
+  val tPostingRead = table[PostingRead]("posting_read")
+  on(tPostingRead)(g => declare(
     g.id is (primaryKey, autoIncremented)))
 
   // Abgabe
@@ -145,4 +154,10 @@ object MySchema extends Schema {
   val tUserSlot = table[UserSlot]("user_slot")
   on(tUserSlot)(g => declare(
     g.id is (primaryKey, autoIncremented)))
+
+  // helper
+  val tRegistrierungUser = table[RegistrierungUser]("registrierung_user")
+  on(tRegistrierungUser)(g => declare(
+    g.id is (primaryKey, autoIncremented)))
+
 }

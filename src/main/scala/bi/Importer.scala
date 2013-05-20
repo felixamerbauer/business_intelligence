@@ -9,6 +9,7 @@ import scala.Array.canBuildFrom
 import scala.Array.fallbackCanBuildFrom
 import scala.xml.Node
 import scala.xml.NodeSeq.seqToNodeSeq
+import scala.io.Source
 import scala.xml._
 import org.joda.time.LocalDateTime
 import org.joda.time.format.DateTimeFormat
@@ -290,10 +291,11 @@ object Importer extends App with Logging {
   }
   def forum() {
     logger.info("forum")
-    logger.info("emptying tables posting, forumsbereich")
     transaction {
-      tPosting.deleteWhere(_ => 1 === 1)
-      tForumsbereich.deleteWhere(_ => 1 === 1)
+      tPosting.update(tPosting.toArray.map(_.copy(parent_id = None)))
+      val tables = Seq(tPostingRead, tPosting, tForumsbereich, tForum)
+      logger.info("emptying tables " + tables.map(_.name).mkString(", "))
+      tables.foreach(_.deleteWhere(_ => 1 === 1))
     }
 
     val forumDir = new File(dataDir, "forum")
@@ -308,8 +310,8 @@ object Importer extends App with Logging {
         val date: Timestamp = node.attribute("date")
         val betreff = (node \ "subject").text
         val text = (node \ "text").text
-        val postingDb = transaction {
-          val postingToInsert = Posting(id = -1, postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = parent_id, user_id = user)
+        val postingDb = {
+          val postingToInsert = Posting(postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = parent_id, user_id = user)
           logger.info("Inserting " + postingToInsert)
           tPosting.insert(postingToInsert)
         }
@@ -325,15 +327,57 @@ object Importer extends App with Logging {
       }
     }
 
+    def processReadProgress(forumsIds: Seq[Long]) {
+      val postingsForumsbereich = (from(tPosting, tForumsbereich)((p, f) =>
+        where(p.forumsbereich_id === f.id)
+          select (p, f))).toArray
+      forumsIds.map { forumsId =>
+        val dir = new File(forumDir, s"$forumsId/User")
+        val personDirs = dir.listFiles().filter(_.isDirectory())
+
+        for (personDir <- personDirs) yield {
+          println("Reading from " + personDir.getCanonicalPath())
+          val readProgressFilter = new FileFilter {
+            override def accept(file: File) = if ("""\d+""".r.pattern.matcher(file.getName).matches()) true
+            else {
+              logger.error("Invalid read progress file " + file.getCanonicalPath())
+              false
+            }
+          }
+          for {
+            readProgressFile <- personDir.listFiles(readProgressFilter)
+            bereichsId = readProgressFile.getName().toInt
+            userId = personDir.getName
+            postingId <- Source.fromFile(readProgressFile).getLines.map(_.toInt)
+          } {
+            postingsForumsbereich.find(e => e._2.forum_id == forumsId && e._2.bereichsid == bereichsId && e._1.postingid == postingId) match {
+              case Some((posting, _)) =>
+                val tToInsert = PostingRead(posting_id = posting.id, user_id = userId)
+                logger.info("Inserting " + tToInsert)
+                tPostingRead.insert(tToInsert)
+              case None =>
+                logger.error(s"No read progress for postingId $postingId forumsId $forumsId and userId $userId in file ${readProgressFile.getCanonicalPath()}")
+            }
+          }
+        }
+      }
+    }
+
     def getForumsbereiche(forumsId: Long): Seq[Forumsbereich] =
       XML.loadFile(new File(forumDir, s"$forumsId/issues.xml")) \ "entry" map { e =>
         val id: Int = e.attribute("id")
         val name: String = e.attribute("what")
         val beschreibung: String = (e \ "text").text
-        Forumsbereich(id = -1, bereichsid = id, name = name, beschreibung = beschreibung, forum_id = forumsId)
+        Forumsbereich(bereichsid = id, name = name, beschreibung = beschreibung, forum_id = forumsId)
       }
 
-    val forums = transaction { tForum.toArray }
+    val forums = transaction {
+      readInstances(new File(forumDir, "descriptions.xml")).map { e =>
+        val toInsert = new Forum(id = e.id, langtext = e.name, lva_dbid = e.lva.id)
+        logger.info("Inserting " + toInsert)
+        tForum.insert(toInsert)
+      }
+    }
     val forumsbereiche =
       transaction {
         val toInsert = forums.flatMap(e => getForumsbereiche(e.id))
@@ -341,7 +385,12 @@ object Importer extends App with Logging {
         tForumsbereich.insert(toInsert)
         tForumsbereich.toArray
       }
-    val posting = forumsbereiche.foreach(e => readAndInsertPostings(forumsId = e.forum_id, forumsbereichId = e.bereichsid, forumsbereichDbid = e.id))
+    transaction {
+      forumsbereiche.foreach { e =>
+        readAndInsertPostings(forumsId = e.forum_id, forumsbereichId = e.bereichsid, forumsbereichDbid = e.id)
+      }
+      processReadProgress(forums.map(_.id))
+    }
 
   }
 
@@ -424,20 +473,15 @@ object Importer extends App with Logging {
             tUserSlot.insert(userSlotToInsert)
           }
         }
-        // additional slot info from custom.xml
-        //        val slotsDb = tSlot.toArray
-        //        checkAndReadFile(file("custom.xml")) foreach { xml =>
-        //          xml \ "group" foreach { group =>
-        //            val groupId:Int = group.attribute("id")
-        //            group \ "slot" foreach { slot =>
-        //              slot.text.split("-") match {
-        //                case Array(from, to) => 
-        //                  tSlot.find(e=> e.)
-        //                case _ => logger.error("Unexpected slot content in custom.xml " + slot.text)
-        //              }
-        //            }
-        //          }
-        //        }
+        // registrierung user
+        val data = (from(tRegistrierung, tRegisterGruppe, tUserGruppe)((r, rg, ug) =>
+          where(r.id === rg.registrierung_id and rg.id === ug.register_gruppe_id)
+            select (r, ug.user_id))).toArray
+        for ((registrierung, userId) <- data) {
+          val ru = RegistrierungUser(registrierung_id = registrierung.id, user_id = userId, name = registrierung.name, lva_id = registrierung.lva_dbid)
+          logger.info("Inserting " + ru)
+          tRegistrierungUser.insert(ru)
+        }
 
       }
 
