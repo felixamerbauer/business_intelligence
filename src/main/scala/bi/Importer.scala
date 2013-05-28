@@ -23,15 +23,19 @@ import org.squeryl.adapters.MySQLAdapter
 import com.typesafe.scalalogging.slf4j.Logging
 import bi.MySchema._
 import org.joda.time.LocalDate
+import org.squeryl.Table
+import org.squeryl.KeyedEntity
 
-/**
- * TODO
- * C:/tools/uni/pentaho/data/Code/5/Data/1/ref301
- */
+object Aspect extends Enumeration {
+  type Aspect = Value
+  val Abgabe, Code, Forum, Registrierung, Global = Value
+}
 
 object Importer extends App with Logging {
   import language.implicitConversions
   import language.postfixOps
+  import bi.Aspect._
+
   val prettyPrinter = new PrettyPrinter(80, 2)
   def pp(node: Node): String = {
     val sb = new StringBuilder()
@@ -55,13 +59,41 @@ object Importer extends App with Logging {
   implicit def localDate2Timestamp(ld: LocalDate): java.sql.Date = new java.sql.Date(ld.toDate().getTime())
   val dataDir = new File("C:/tools/uni/pentaho/data")
 
+  val allTables = Map(
+    Abgabe -> Seq(tAbgabeTestUser, tAbgabeFeedback, tAbgabeUpload, tAbgabeTest, tAbgabeSubtask, tAbgabeTask, tAbgabeMitarbeit, tAbgabeGruppe, tAbgabe),
+    Code -> Seq(tCodeUpload, tCodeTopic),
+    Forum -> Seq(tPostingRead, tPosting, tForumsbereich, tForum),
+    Registrierung -> Seq(tUserSlot, tUserGruppe, tSlot, tRegisterGruppe, tRegistrierungUser, tRegistrierung),
+    Global -> Seq(tUser, tLva))
+
   import org.squeryl.SessionFactory
 
   val dirFilter = new FileFilter {
     override def accept(file: File) = file.isDirectory()
   }
+
   val nonDirFilter = new FileFilter {
     override def accept(file: File) = !file.isDirectory()
+  }
+
+  private def delete(aspects: Aspect*) {
+    transaction {
+      if (aspects.contains(Forum))
+        tPosting.update(tPosting.toArray.map(_.copy(parent_id = None)))
+      for {
+        aspect <- aspects
+        table <- allTables(aspect)
+      } {
+        logger.info("emptying table " + aspect + "/" + table.name)
+        table.deleteWhere(_ => 1 === 1)
+      }
+    }
+  }
+
+  def global() {
+    logger.info("global")
+    delete(Abgabe, Code, Forum, Registrierung, Global)
+
   }
 
   def abgabe() {
@@ -100,10 +132,9 @@ object Importer extends App with Logging {
         val long: String = task.attribute("long")
         // Aufgabenzuordung pro Gruppe
         val groupTask = node \ "group" \ "task" find { e =>
-          val groupTaskId: String = e.attribute("id");
+          val groupTaskId: Int = e.attribute("id")
           groupTaskId == id
         }
-
         val (from, to, presence) = if (groupTask.isDefined) {
           val f: Timestamp = groupTask.get.attribute("from")
           val t: Timestamp = groupTask.get.attribute("to")
@@ -206,11 +237,7 @@ object Importer extends App with Logging {
     }
 
     logger.info("abgabe")
-    transaction {
-      val tables = Seq(tAbgabeTestUser, tAbgabeFeedback, tAbgabeUpload, tAbgabeTest, tAbgabeSubtask, tAbgabeTask, tAbgabeMitarbeit, tAbgabeGruppe, tAbgabe)
-      logger.info("emptying tables " + tables.map(_.name).mkString(", "))
-      tables.foreach(_.deleteWhere(_ => 1 === 1))
-    }
+    delete(Abgabe)
 
     transaction {
       val instances = readInstances(new File(abgabeDir, "descriptions.xml"))
@@ -219,7 +246,7 @@ object Importer extends App with Logging {
         logger.info("Inserting " + toInsert)
         tAbgabe.insert(toInsert)
       }
-      abgaben foreach { abgabe =>
+      abgaben.take(2) foreach { abgabe =>
         def file(name: String) = new File(abgabeDir, s"${abgabe.id}/$name")
         // tasks
         checkAndReadFile(file("tasks.xml")) foreach { xml =>
@@ -276,6 +303,7 @@ object Importer extends App with Logging {
         (matrnrDir.getName(), LocalDateTime.fromDateFields(new Date(currentFile.get.lastModified())))
       }
     }
+    delete(Code)
     val data = getInstances.map { e => (e, getUploads(e)) }
     // persist to db
     transaction {
@@ -287,16 +315,12 @@ object Importer extends App with Logging {
         tCodeUpload.insert(cd)
       }
     }
-    println(data)
   }
   def forum() {
     logger.info("forum")
-    transaction {
-      tPosting.update(tPosting.toArray.map(_.copy(parent_id = None)))
-      val tables = Seq(tPostingRead, tPosting, tForumsbereich, tForum)
-      logger.info("emptying tables " + tables.map(_.name).mkString(", "))
-      tables.foreach(_.deleteWhere(_ => 1 === 1))
-    }
+    delete(Forum)
+
+    val userIds = transaction { tUser.toArray.map(_.id).toSet }
 
     val forumDir = new File(dataDir, "forum")
 
@@ -310,13 +334,17 @@ object Importer extends App with Logging {
         val date: Timestamp = node.attribute("date")
         val betreff = (node \ "subject").text
         val text = (node \ "text").text
-        val postingDb = {
-          val postingToInsert = Posting(postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = parent_id, user_id = user)
-          logger.info("Inserting " + postingToInsert)
-          tPosting.insert(postingToInsert)
+        if (userIds.contains(user)) {
+          val postingDb = {
+            val postingToInsert = Posting(postingid = id, datum = date, betreff_laenge = betreff.length(), text_laenge = text.length(), forumsbereich_id = forumsbereichDbid, parent_id = parent_id, user_id = user)
+            logger.info("Inserting " + postingToInsert)
+            tPosting.insert(postingToInsert)
+          }
+          // Optional answers
+          node \ "sub" \ "entry" foreach { e => process(e, Some(postingDb.id)) }
+        } else {
+          logger.error(s"Unknown user $user in forumsbereich $forumsbereichId in forum $forumsId")
         }
-        // Optional answers
-        node \ "sub" \ "entry" foreach { e => process(e, Some(postingDb.id)) }
       }
       val file = new File(forumDir, s"$forumsId/Data/$forumsbereichId.xml")
       if (file.exists()) {
@@ -372,7 +400,7 @@ object Importer extends App with Logging {
       }
 
     val forums = transaction {
-      readInstances(new File(forumDir, "descriptions.xml")).map { e =>
+      readInstances(new File(forumDir, "descriptions.xml")).filter(_.id == 100).map { e =>
         val toInsert = new Forum(id = e.id, langtext = e.name, lva_dbid = e.lva.id)
         logger.info("Inserting " + toInsert)
         tForum.insert(toInsert)
@@ -396,10 +424,7 @@ object Importer extends App with Logging {
 
   def registrierung() {
     logger.info("registrierung")
-    logger.info("emptying tables user_slot, user_gruppe, slot, register_gruppe, registrierung")
-    transaction {
-      Seq(tUserSlot, tUserGruppe, tSlot, tRegisterGruppe, tRegistrierung).foreach(_.deleteWhere(_ => 1 === 1))
-    }
+    delete(Registrierung)
     val registerDir = new File(dataDir, "Register")
 
     transaction {
@@ -465,6 +490,8 @@ object Importer extends App with Logging {
             if (registerGruppe.isDefined)
             if (userIds.contains(userId))
           } {
+            // TODO Start End
+
             val slotToInsert = Slot(slot_id = slot, unit = unit, start = None, ende = None, register_gruppe_id = registerGruppe.get.id)
             logger.info("Inserting " + slotToInsert)
             val slotDb = tSlot.insert(slotToInsert)
@@ -524,63 +551,19 @@ object Importer extends App with Logging {
   // Program start
   initDb
   args match {
+    case Array("global") => global()
     case Array("registrierung") => registrierung()
     case Array("code") => code()
     case Array("forum") => forum()
     case Array("abgabe") => abgabe()
+    case Array("all") => {
+      global()
+      registrierung()
+      code()
+      forum()
+      abgabe()
+    }
     case _ => println("Invalid parameters")
   }
-  //  val (forums, persons) = readForum
 }
-
-
-    //    def getPersons(forumsIds: Seq[Int]): Seq[(Int, Seq[Person])] = {
-    //      def personsForum(forumsId: Int): Seq[Person] = {
-    //        val data = XML.loadFile(new File(forumDir, s"$forumsId/persons.xml"))
-    //        data \ "person" map { e =>
-    //          val id: String = e.attribute("id")
-    //          val name: String = e.attribute("name")
-    //          val email: String = e.attribute("email")
-    //          Person(id = id,
-    //            name = name,
-    //            email = email,
-    //            geschlecht = None,
-    //            dateOfBirth = None,
-    //            // differntiate all types
-    //            personType = { if (id.startsWith("a")) Student else Lecturer })
-    //        }
-    //      }
-    //      forumsIds.map(e => (e, personsForum(e)))
-    //    }
-    //
-    //    def getReadProgress(forumsIds: Seq[Int]) = {
-    //      forumsIds.map { forumsId =>
-    //        val dir = new File(forumDir, s"$forumsId/User")
-    //        val personDirs = dir.listFiles().filter(_.isDirectory())
-    //
-    //        for (personDir <- personDirs) yield {
-    //          println("Reading from " + personDir.getCanonicalPath())
-    //          val readProgressFilter = new FileFilter {
-    //            override def accept(file: File) = if ("""\d+""".r.pattern.matcher(file.getName).matches()) true
-    //            else {
-    //              logger.error("Invalid read progress file " + file.getCanonicalPath())
-    //              false
-    //            }
-    //          }
-    //          val readProgress = for (readProgressFile <- personDir.listFiles(readProgressFilter)) yield {
-    //            (readProgressFile.getName, Source.fromFile(readProgressFile).getLines.map(_.toInt))
-    //          }
-    //          (personDir.getName(), readProgress)
-    //        }
-    //      }
-    //    }
-    //    val forumIds = forums.map(_.id)
-
-    //    val readProgress = getReadProgress(forumIds)
-    //
-    //    val personsPerForum = getPersons(forumIds)
-    //
-    //    val personsWithDupes = personsPerForum.map(_._2).flatten.sortBy(_.id)
-
-    //    (forums, /* TODO readProgress*/ personsWithDupes)
 
