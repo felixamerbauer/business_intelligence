@@ -9,7 +9,7 @@ import org.squeryl.PrimitiveTypeMode._
 import org.squeryl.Schema
 
 // General
-case class User(id: String, email: Option[String], name: Option[String], admin: Option[Boolean], geschlecht: Option[String]) extends KeyedEntity[String]
+case class User(id: String, email: Option[String], name: Option[String], admin: Option[Boolean], geschlecht: Option[String], geburtsdatum: Option[Date]) extends KeyedEntity[String]
 
 case class Lva(id: Long, name: String, semester: String) extends KeyedEntity[Long]
 
