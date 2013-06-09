@@ -1,28 +1,24 @@
 package bi
-import java.io.File
-import java.io.FileFilter
-import java.util.Date
-
-import scala.Array.canBuildFrom
-import scala.Array.fallbackCanBuildFrom
-
-import org.joda.time.LocalDateTime
-import org.squeryl.PrimitiveTypeMode._
 
 import com.typesafe.scalalogging.slf4j.Logging
-
-/*
-import bi.Aspects._
-import bi.MySchema._
+import org.squeryl.PrimitiveTypeMode._
+import java.sql.Timestamp
+import java.io.File
 import bi.Util._
-*/
+import bi.Aspects.AForum
+import bi.DBSchema.{tPosting,tUser,tForum,tForumsbereich,tPostingRead}
+import scala.xml.XML
+import scala.xml.Node
+import java.io.FileFilter
+import scala.io.Source
+import bi.Implicits._
 
 object ImporterForum extends Logging {
   def forum() {
     logger.info("forum")
-    delete(Forum)
+    delete(AForum)
 
-    val userIds = transaction { tUser.toArray.map(_.id).toSet }
+    lazy val userIds = tUser.toArray.map(_.id).toSet
 
     def readAndInsertPostings(forumsId: Long, forumsbereichId: Long, forumsbereichDbid: Long) {
       // recursive method
@@ -46,21 +42,22 @@ object ImporterForum extends Logging {
           logger.error(s"Unknown user $user in forumsbereich $forumsbereichId in forum $forumsId")
         }
       }
-      val file = new File(dirs(Forum), s"$forumsId/Data/$forumsbereichId.xml")
+      val file = new File(dirs(AForum), s"$forumsId/Data/$forumsbereichId.xml")
       if (file.exists()) {
         val data = XML.loadFile(file)
-        data \ "entry" foreach { e => process(e) }
+        data \ "entry" foreach { e =>  process(e)  }
       } else {
         logger.error(s"No postings for forumsId $forumsId forumsbereichId $forumsbereichId")
       }
     }
+
 
     def processReadProgress(forumsIds: Seq[Long]) {
       val postingsForumsbereich = (from(tPosting, tForumsbereich)((p, f) =>
         where(p.forumsbereich_id === f.id)
           select (p, f))).toArray
       forumsIds.map { forumsId =>
-        val dir = new File(dirs(Forum), s"$forumsId/User")
+        val dir = new File(dirs(AForum), s"$forumsId/User")
         val personDirs = dir.listFiles().filter(_.isDirectory())
 
         for (personDir <- personDirs) yield {
@@ -92,22 +89,21 @@ object ImporterForum extends Logging {
     }
 
     def getForumsbereiche(forumsId: Long): Seq[Forumsbereich] =
-      XML.loadFile(new File(dirs(Forum), s"$forumsId/issues.xml")) \ "entry" map { e =>
+      XML.loadFile(new File(dirs(AForum), s"$forumsId/issues.xml")) \ "entry" map { e =>
         val id: Int = e.attribute("id")
         val name: String = e.attribute("what")
         val beschreibung: String = (e \ "text").text
         Forumsbereich(bereichsid = id, name = name, beschreibung = beschreibung, forum_id = forumsId)
       }
 
-    val forums = transaction {
-      readInstances(new File(dirs(Forum), "descriptions.xml")).filter(_.id == 100).map { e =>
+    def forums = {
+      readInstances(new File(dirs(AForum), "descriptions.xml")).filter(_.id == 100).map { e =>
         val toInsert = new Forum(id = e.id, langtext = e.name, lva_dbid = e.lva.id)
         logger.info("Inserting " + toInsert)
         tForum.insert(toInsert)
       }
     }
-    val forumsbereiche =
-      transaction {
+    def forumsbereiche = {
         val toInsert = forums.flatMap(e => getForumsbereiche(e.id))
         logger.info("Inserting\n\t" + toInsert.mkString("-" * 30, "\n\t", "-" * 30))
         tForumsbereich.insert(toInsert)
@@ -119,7 +115,6 @@ object ImporterForum extends Logging {
       }
       processReadProgress(forums.map(_.id))
     }
-
   }
-
 }
+

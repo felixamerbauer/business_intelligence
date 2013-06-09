@@ -4,11 +4,9 @@ name := "business_intelligence"
 
 version := "0.1.0"
  
-// scalaVersion := "2.10.2-RC1"
-// scalaVersion := "2.10.2-RC1"
-scalaVersion := "2.10.0"
+scalaVersion := "2.10.2"
 
-scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature", "-encoding", "Cp1252")
+scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature", "-encoding", "UTF-8")
 
 // SBT-Eclipse settings
 EclipseKeys.executionEnvironment := Some(EclipseExecutionEnvironment.JavaSE17)

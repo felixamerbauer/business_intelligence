@@ -10,7 +10,7 @@ import scala.Array.fallbackCanBuildFrom
 import scala.xml.Node
 import scala.xml.NodeSeq.seqToNodeSeq
 import scala.io.Source
-import scala.xml._
+import scala.xml.PrettyPrinter
 import org.joda.time.LocalDateTime
 import org.joda.time.format.DateTimeFormat
 import org.squeryl.PrimitiveTypeMode._
@@ -21,14 +21,17 @@ import org.squeryl.Session
 import org.squeryl.SessionFactory
 import org.squeryl.adapters.MySQLAdapter
 import com.typesafe.scalalogging.slf4j.Logging
-import bi.MySchema._
+import bi.DBSchema._
 import org.joda.time.LocalDate
 import org.squeryl.Table
 import org.squeryl.KeyedEntity
 import bi.Aspects._
+import scala.xml.XML
+import bi.Implicits._
 
 object Util extends Logging {
-    val prettyPrinter = new PrettyPrinter(80, 2)
+
+  val prettyPrinter = new PrettyPrinter(80, 2)
   def pp(node: Node): String = {
     val sb = new StringBuilder()
     prettyPrinter.format(node, sb)
@@ -36,12 +39,13 @@ object Util extends Logging {
   }
 
   val matrnrRegex = """a\d+""".r
-  val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
-  val df = DateTimeFormat.forPattern("yyyy-MM-dd")
+//  val dtf = DateTimeFormat.forPattern("yyyy-MM-dd'T'HH:mm:ss")
+//  val df = DateTimeFormat.forPattern("yyyy-MM-dd")
   val sdf = DateTimeFormat.forPattern("MMyyyy")
   val dmyf = DateTimeFormat.forPattern("dd.MM.yyyy")
   val tf = DateTimeFormat.forPattern("HH:mm")
 
+/*	
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
   implicit def optionSeqXmlNode2Long(osxn: Option[Seq[Node]]): Long = optionSeqXmlNode2String(osxn).toLong
@@ -50,20 +54,21 @@ object Util extends Logging {
 
   implicit def localDateTime2Timestamp(ldt: LocalDateTime): Timestamp = new Timestamp(ldt.toDate().getTime())
   implicit def localDate2Timestamp(ld: LocalDate): java.sql.Date = new java.sql.Date(ld.toDate().getTime())
+*/	
   val dataDir = new File("C:/tools/uni/pentaho/data")
 
   val allTables = Map(
-    Abgabe -> Seq(tAbgabeTestUser, tAbgabeFeedback, tAbgabeUpload, tAbgabeTest, tAbgabeSubtask, tAbgabeTask, tAbgabeMitarbeit, tAbgabeGruppe, tAbgabe),
-    Code -> Seq(tCodeUpload, tCodeTopic),
-    Forum -> Seq(tPostingRead, tPosting, tForumsbereich, tForum),
-    Registrierung -> Seq(tUserSlot, tUserGruppe, tSlot, tRegisterGruppe, tRegistrierungUser, tRegistrierung),
-    Global -> Seq(tUser, tLva))
+    AAbgabe -> Seq(tAbgabeTestUser, tAbgabeFeedback, tAbgabeUpload, tAbgabeTest, tAbgabeSubtask, tAbgabeTask, tAbgabeMitarbeit, tAbgabeGruppe, tAbgabe),
+    ACode -> Seq(tCodeUpload, tCodeTopic),
+    AForum -> Seq(tPostingRead, tPosting, tForumsbereich, tForum),
+    ARegistrierung -> Seq(tUserSlot, tUserGruppe, tSlot, tRegisterGruppe, tRegistrierungUser, tRegistrierung),
+    AGlobal -> Seq(tUser, tLva))
 
   val dirs = Map(
-    Abgabe -> new File(dataDir, "Abgabe"),
-    Code -> new File(dataDir, "Code"),
-    Forum -> new File(dataDir, "Forum"),
-    Registrierung -> new File(dataDir, "Register"))
+    AAbgabe -> new File(dataDir, "Abgabe"),
+    ACode -> new File(dataDir, "Code"),
+    AForum -> new File(dataDir, "Forum"),
+    ARegistrierung -> new File(dataDir, "Register"))
 
   import org.squeryl.SessionFactory
 
@@ -75,7 +80,7 @@ object Util extends Logging {
     override def accept(file: File) = !file.isDirectory()
   }
 
-  def delete(aspects: Aspect*) {
+  def delete(aspects: String*) {
     transaction {
       if (aspects.contains(Forum))
         tPosting.update(tPosting.toArray.map(_.copy(parent_id = None)))
@@ -86,6 +91,20 @@ object Util extends Logging {
         logger.info("emptying table " + aspect + "/" + table.name)
         table.deleteWhere(_ => 1 === 1)
       }
+    }
+  }
+
+  case class Instance(id: Int, name: String, lva: Lva)
+
+  def readInstances(file: File): Seq[Instance] = {
+    val lvas = tLva.toArray
+    val pattern = """(?s)http://[^/]+/[^/]+/([^/]+)/.*(se\d\d)[^:]*:(.*)""".r
+    XML.loadFile(file) \ "instance" map { node =>
+      val id: Int = node.attribute("id")
+      val url: String = node.text
+      println("Checking " + url)
+      val pattern(lvaName, lvaSemester, beschreibung) = url
+      Instance(id = id, name = beschreibung, lva = lvas.find(e => e.name == lvaName && e.semester == lvaSemester).get)
     }
   }
 
