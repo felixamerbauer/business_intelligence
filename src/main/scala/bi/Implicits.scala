@@ -36,6 +36,7 @@ object Implicits extends Logging {
   implicit def optionSeqXmlNode2String(osxn: Option[Seq[Node]]): String = osxn.get.text
   implicit def optionSeqXmlNode2Int(osxn: Option[Seq[Node]]): Int = optionSeqXmlNode2String(osxn).toInt
   implicit def optionSeqXmlNode2Long(osxn: Option[Seq[Node]]): Long = optionSeqXmlNode2String(osxn).toLong
+  implicit def optionSeqXmlNode2Boolean(osxn: Option[Seq[Node]]): Boolean = optionSeqXmlNode2String(osxn).toBoolean
   implicit def optionSeqXmlNode2LocalDate(osxn: Option[Seq[Node]]): LocalDate = df.parseLocalDate(optionSeqXmlNode2String(osxn))
   implicit def optionSeqXmlNode2Timestamp(osxn: Option[Seq[Node]]): Timestamp = new Timestamp(dtf.parseLocalDateTime(optionSeqXmlNode2String(osxn)).toDate().getTime())
 
